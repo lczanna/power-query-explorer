@@ -193,8 +193,24 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
         .main-content.active { display:block; }
         @keyframes fadeUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
 
-        .file-list { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
-        .file-chip { display:inline-flex; align-items:center; gap:6px; padding:5px 12px; background:var(--bg-secondary); border:1px solid var(--border-subtle); border-radius:var(--radius-xl); font-size:12px; color:var(--text-secondary); font-weight:500; }
+        .file-list { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+        .file-select-all {
+            display:inline-flex; align-items:center; gap:6px; padding:5px 10px;
+            background:var(--bg-tertiary); border:1px solid var(--border-color);
+            border-radius:999px; color:var(--text-secondary); font-size:11.5px; font-weight:600;
+            cursor:pointer; font-family:inherit;
+        }
+        .file-select-all:hover { background:var(--bg-elevated); color:var(--text-primary); border-color:var(--accent-teal); }
+        .file-list-hint { font-size:11px; color:var(--text-dim); margin-right:4px; }
+        .file-chip {
+            display:inline-flex; align-items:center; gap:6px; padding:5px 12px; background:var(--bg-secondary);
+            border:1px solid var(--border-subtle); border-radius:var(--radius-xl); font-size:12px;
+            color:var(--text-secondary); font-weight:500; cursor:pointer; user-select:none;
+            transition:all 0.15s ease;
+        }
+        .file-chip:hover { border-color:var(--border-color); color:var(--text-primary); }
+        .file-chip.active { border-color:var(--accent-teal); color:var(--text-primary); background:rgba(47,168,155,0.08); }
+        .file-chip.inactive { opacity:0.45; }
         .file-chip .dot { width:7px; height:7px; border-radius:50%; }
         .file-chip .qc { font-family:'Cascadia Code','Fira Code','Consolas',monospace; font-size:10px; color:var(--text-muted); padding:1px 6px; background:var(--bg-tertiary); border-radius:8px; }
 
@@ -221,10 +237,7 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
         .graph-search svg { width:14px; height:14px; color:var(--text-dim); flex-shrink:0; }
         .graph-search input { background:none; border:none; color:var(--text-primary); font-family:inherit; font-size:12px; outline:none; width:160px; }
         .graph-search input::placeholder { color:var(--text-dim); }
-        #graph-container { width:100%; height:520px; }
-        .graph-legend { display:flex; gap:16px; padding:10px 16px; border-top:1px solid var(--border-subtle); flex-wrap:wrap; }
-        .legend-item { display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--text-muted); font-weight:500; }
-        .legend-dot { width:8px; height:8px; border-radius:50%; box-shadow:0 0 6px currentColor; }
+        #graph-container { width:100%; height:600px; }
 
         .code-panel { display:none; background:var(--bg-secondary); border-radius:var(--radius-lg); border:1px solid var(--border-subtle); overflow:hidden; }
         .code-panel.active { display:block; }
@@ -310,7 +323,7 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
             header { flex-direction:column; gap:10px; align-items:flex-start; }
             .stats-bar { flex-wrap:wrap; }
             .stat { min-width:120px; }
-            #graph-container { height:360px; }
+            #graph-container { height:420px; }
             .code-toolbar { flex-direction:column; }
             .graph-search input { width:120px; }
         }
@@ -395,7 +408,6 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
                     </div>
                 </div>
                 <div id="graph-container"></div>
-                <div class="graph-legend" id="graphLegend"></div>
             </div>
             <div class="code-panel" id="codePanel">
                 <div class="code-toolbar">
@@ -451,7 +463,7 @@ const PROMPT_TEMPLATES={
     errors:'Review these Power Query M scripts for potential errors and issues:\n1. Check for hardcoded values that should be parameters\n2. Identify missing error handling\n3. Flag potential null/empty value issues\n4. Check for type mismatches\n5. Identify queries that might fail with data changes\n\nHere are the queries:\n\n'
 };
 const FILE_COLORS=['#2fa89b','#4c86c8','#7a67c7','#c88a36','#c65364','#3e9b6c','#6f7f95','#9c6f4f','#5f8f8a','#8d6fae'];
-let appState={files:[],queries:[],errors:[],cyInstance:null};
+let appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null};
 
 function escapeHtml(t){return typeof t!=='string'?'':t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 
@@ -644,54 +656,114 @@ function showBottomNotice(msg){
 }
 function hideBottomNotice(){document.getElementById('bottomNotice').classList.remove('visible');}
 
+function getActiveFileSet(){return new Set(appState.selectedFiles);}
+function getActiveFiles(){const s=getActiveFileSet();return appState.files.filter(f=>s.has(f));}
+function getActiveQueries(){const s=getActiveFileSet();return appState.queries.filter(q=>s.has(q.fileName));}
+function applyFileSelection(){updateStats();renderFileList();renderGraph();renderCodePanel();}
+
 function updateStats(){
-    const q=appState.queries,deps=q.reduce((s,x)=>s+x.dependencies.length,0);
+    const q=getActiveQueries(),qNames=new Set(q.map(x=>x.name));
+    const deps=q.reduce((s,x)=>s+x.dependencies.filter(d=>qNames.has(d)).length,0);
     const chars=q.reduce((s,x)=>s+x.code.length+x.name.length+30,0);
-    document.getElementById('statFiles').textContent=appState.files.length;
+    document.getElementById('statFiles').textContent=getActiveFiles().length;
     document.getElementById('statQueries').textContent=q.length;
     document.getElementById('statDeps').textContent=deps;
     document.getElementById('statTokens').textContent='~'+Math.round(chars/3.5).toLocaleString();
 }
 
 function renderFileList(){
+    const list=document.getElementById('fileList');
     const bf={};for(const q of appState.queries)bf[q.fileName]=(bf[q.fileName]||0)+1;
-    document.getElementById('fileList').innerHTML=appState.files.map((f,i)=>
-        '<div class="file-chip"><span class="dot" style="background:'+FILE_COLORS[i%FILE_COLORS.length]+'"></span>'+escapeHtml(f)+'<span class="qc">'+(bf[f]||0)+'</span></div>'
-    ).join('');
+    const active=getActiveFileSet();
+    list.innerHTML='<button class="file-select-all" id="fileSelectAll">Select All Files</button><span class="file-list-hint">Ctrl/Cmd+click to select multiple files</span>'+
+        appState.files.map((f,i)=>{
+            const isActive=active.has(f);
+            return '<div class="file-chip '+(isActive?'active':'inactive')+'" data-file="'+escapeHtml(f)+'"><span class="dot" style="background:'+FILE_COLORS[i%FILE_COLORS.length]+'"></span>'+escapeHtml(f)+'<span class="qc">'+(bf[f]||0)+'</span></div>';
+        }).join('');
+    const selAll=document.getElementById('fileSelectAll');
+    if(selAll)selAll.addEventListener('click',()=>{
+        appState.selectedFiles=[...appState.files];
+        applyFileSelection();
+    });
+    list.querySelectorAll('.file-chip').forEach(chip=>chip.addEventListener('click',e=>{
+        const file=chip.dataset.file;
+        const multi=e.ctrlKey||e.metaKey;
+        const next=new Set(appState.selectedFiles);
+        if(multi){
+            if(next.has(file))next.delete(file);else next.add(file);
+        }else{
+            next.clear();
+            next.add(file);
+        }
+        appState.selectedFiles=appState.files.filter(f=>next.has(f));
+        applyFileSelection();
+    }));
+}
+
+function getGraphLayout(nodeCount,animate){
+    const spread=nodeCount>30?2.2:nodeCount>18?1.6:1.15;
+    return {
+        name:'cose',
+        animate:!!animate,
+        animationDuration:animate?500:0,
+        nodeRepulsion:function(){return 9000*spread;},
+        idealEdgeLength:function(){return 120*spread;},
+        edgeElasticity:85,
+        gravity:nodeCount>20?0.22:0.32,
+        nodeOverlap:30,
+        componentSpacing:120*spread,
+        numIter:1200,
+        padding:80,
+        fit:true,
+        randomize:true,
+        nodeDimensionsIncludeLabels:true
+    };
 }
 
 function renderGraph(){
     const ct=document.getElementById('graph-container');
+    if(appState.cyInstance){appState.cyInstance.destroy();appState.cyInstance=null;}
     if(!appState.queries.length){ct.innerHTML='<div class="empty-state">No queries to visualize</div>';return;}
+    const activeQueries=getActiveQueries();
+    if(!activeQueries.length){ct.innerHTML='<div class="empty-state">No files selected. Use the file legend above.</div>';return;}
     const cm={};appState.files.forEach((f,i)=>{cm[f]=FILE_COLORS[i%FILE_COLORS.length];});
-    const nodes=appState.queries.map(q=>({data:{id:q.fileName+'::'+q.name,label:q.name,fileName:q.fileName,color:cm[q.fileName]||'#94a3b8'}}));
+    const byName=new Map();for(const q of activeQueries)if(!byName.has(q.name))byName.set(q.name,q);
+    const nodes=activeQueries.map(q=>({data:{id:q.fileName+'::'+q.name,label:q.name,fileName:q.fileName,color:cm[q.fileName]||'#8c99a8'}}));
     const nids=new Set(nodes.map(n=>n.data.id)),edges=[];
-    for(const q of appState.queries)for(const dep of q.dependencies){
-        const dq=appState.queries.find(x=>x.name===dep);
+    for(const q of activeQueries)for(const dep of q.dependencies){
+        const dq=byName.get(dep);
         if(dq){const s=q.fileName+'::'+q.name,t=dq.fileName+'::'+dq.name;if(nids.has(s)&&nids.has(t)&&s!==t)edges.push({data:{source:s,target:t}});}
     }
-    if(appState.cyInstance)appState.cyInstance.destroy();
     appState.cyInstance=cytoscape({container:ct,elements:[...nodes,...edges],
         style:[
-            {selector:'node',style:{'background-color':'data(color)','label':'data(label)','color':'#d5deea','font-size':'10px','font-family':"'Cascadia Code','Fira Code','Consolas',monospace",'text-valign':'bottom','text-margin-y':7,'width':20,'height':20,'border-width':2,'border-color':'data(color)','border-opacity':0.34,'background-opacity':0.86,'text-outline-color':'#111418','text-outline-width':2,'text-max-width':'120px','text-wrap':'ellipsis'}},
+            {selector:'node',style:{'background-color':'data(color)','label':'data(label)','color':'#d5deea','font-size':'10px','font-family':"'Cascadia Code','Fira Code','Consolas',monospace",'text-valign':'bottom','text-margin-y':7,'width':18,'height':18,'border-width':2,'border-color':'data(color)','border-opacity':0.34,'background-opacity':0.86,'text-max-width':'160px','text-wrap':'wrap','text-background-color':'#111418','text-background-opacity':0.82,'text-background-padding':'2px','text-background-shape':'roundrectangle'}},
             {selector:'edge',style:{'width':1.5,'line-color':'#3e4b5d','target-arrow-color':'#3e4b5d','target-arrow-shape':'triangle','curve-style':'bezier','arrow-scale':0.7,'opacity':0.66}},
             {selector:'node:selected',style:{'border-width':3,'border-color':'#2fa89b','border-opacity':1,'background-opacity':1}},
             {selector:'node.highlighted',style:{'border-width':3,'border-color':'#c88a36','border-opacity':1,'width':28,'height':28,'font-size':'12px','z-index':999}},
             {selector:'node.dimmed',style:{'opacity':0.15}},
             {selector:'edge.dimmed',style:{'opacity':0.05}}
         ],
-        layout:{name:'cose',animate:false,nodeRepulsion:function(){return 10000;},idealEdgeLength:function(){return 120;},gravity:0.4,numIter:500,padding:40},
+        layout:getGraphLayout(nodes.length,false),
         minZoom:0.2,maxZoom:4
     });
-    document.getElementById('graphLegend').innerHTML=appState.files.map((f,i)=>{const c=FILE_COLORS[i%FILE_COLORS.length];return '<div class="legend-item"><div class="legend-dot" style="background:'+c+';color:'+c+'"></div>'+escapeHtml(f)+'</div>';}).join('');
 }
 
 function renderCodePanel(){
     const content=document.getElementById('codeContent'),filters=document.getElementById('codeFilters');
-    filters.innerHTML=appState.files.map((f,i)=>'<label class="filter-checkbox"><input type="checkbox" checked data-file="'+escapeHtml(f)+'"><span style="color:'+FILE_COLORS[i%FILE_COLORS.length]+'">'+escapeHtml(f)+'</span></label>').join('');
-    const bf={};for(const q of appState.queries){if(!bf[q.fileName])bf[q.fileName]=[];bf[q.fileName].push(q);}
-    content.innerHTML=appState.files.map((f,fi)=>{
-        const qs=bf[f]||[],c=FILE_COLORS[fi%FILE_COLORS.length];
+    const activeFiles=getActiveFiles(),activeQueries=getActiveQueries();
+    if(!activeFiles.length){
+        filters.innerHTML='';
+        content.innerHTML='<div class="empty-state">No files selected. Use the file legend above.</div>';
+        updSel();
+        return;
+    }
+    filters.innerHTML=activeFiles.map(f=>{
+        const idx=appState.files.indexOf(f);
+        return '<label class="filter-checkbox"><input type="checkbox" checked data-file="'+escapeHtml(f)+'"><span style="color:'+FILE_COLORS[(idx<0?0:idx)%FILE_COLORS.length]+'">'+escapeHtml(f)+'</span></label>';
+    }).join('');
+    const bf={};for(const q of activeQueries){if(!bf[q.fileName])bf[q.fileName]=[];bf[q.fileName].push(q);}
+    content.innerHTML=activeFiles.map(f=>{
+        const qs=bf[f]||[],idx=appState.files.indexOf(f),c=FILE_COLORS[(idx<0?0:idx)%FILE_COLORS.length];
         return '<div class="file-section" data-file="'+escapeHtml(f)+'"><div class="file-header" onclick="toggleFS(this)"><svg class="file-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg><span class="file-name" style="color:'+c+'">'+escapeHtml(f)+'</span><span class="file-badge">'+qs.length+' quer'+(qs.length===1?'y':'ies')+'</span></div><div class="file-queries">'+qs.map(q=>
             '<div class="query-block"><div class="query-header"><input type="checkbox" class="query-checkbox" checked data-query="'+escapeHtml(q.name)+'" data-file="'+escapeHtml(q.fileName)+'"><span class="query-name">'+escapeHtml(q.name)+'</span>'+(q.dependencies.length?'<span class="query-deps">\u2192 '+q.dependencies.map(d=>escapeHtml(d)).join(', ')+'</span>':'')+((q.externalRefs&&q.externalRefs.length)?'<span class="query-files'+(q.dependencies.length?'':' only')+'">\u2197 '+q.externalRefs.map(d=>escapeHtml(d)).join(', ')+'</span>':'')+'</div><pre class="query-code">'+hlM(q.code)+'</pre></div>'
         ).join('')+'</div></div>';
@@ -732,7 +804,8 @@ async function processFiles(files){
     document.getElementById('errorLog').classList.remove('visible');
     hideBottomNotice();
     const prog=document.getElementById('fileProgress');
-    appState={files:[],queries:[],errors:[],cyInstance:appState.cyInstance};
+    if(appState.cyInstance){appState.cyInstance.destroy();}
+    appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null};
 
     for(let i=0;i<files.length;i++){
         const f=files[i];prog.textContent=(i+1)+' / '+files.length+': '+f.name;
@@ -759,7 +832,8 @@ async function processFiles(files){
     if(appState.queries.length>0){
         document.getElementById('mainContent').classList.add('active');
         document.getElementById('resetBtn').classList.add('visible');
-        updateStats();renderFileList();renderGraph();renderCodePanel();
+        appState.selectedFiles=[...appState.files];
+        applyFileSelection();
     }else{
         document.getElementById('dropZone').style.display='block';
         if(!noQueryErrors.length)showToast('No Power Query code found. Check Data > Queries in Excel.','warning');
@@ -768,7 +842,7 @@ async function processFiles(files){
 
 function resetApp(){
     if(appState.cyInstance){appState.cyInstance.destroy();}
-    appState={files:[],queries:[],errors:[],cyInstance:null};
+    appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null};
     document.getElementById('mainContent').classList.remove('active');
     document.getElementById('resetBtn').classList.remove('visible');
     document.getElementById('errorLog').classList.remove('visible');
@@ -862,7 +936,10 @@ document.querySelectorAll('.prompt-template').forEach(b=>{b.addEventListener('cl
 document.getElementById('graphZoomIn').addEventListener('click',()=>{if(appState.cyInstance)appState.cyInstance.zoom(appState.cyInstance.zoom()*1.3);});
 document.getElementById('graphZoomOut').addEventListener('click',()=>{if(appState.cyInstance)appState.cyInstance.zoom(appState.cyInstance.zoom()*0.7);});
 document.getElementById('graphFit').addEventListener('click',()=>{if(appState.cyInstance)appState.cyInstance.fit(null,40);});
-document.getElementById('graphRelayout').addEventListener('click',()=>{if(appState.cyInstance)appState.cyInstance.layout({name:'cose',animate:true,animationDuration:500,nodeRepulsion:function(){return 10000;},idealEdgeLength:function(){return 120;},gravity:0.4,numIter:500,padding:40}).run();});
+document.getElementById('graphRelayout').addEventListener('click',()=>{
+    if(!appState.cyInstance)return;
+    appState.cyInstance.layout(getGraphLayout(appState.cyInstance.nodes().length,true)).run();
+});
 
 let _gs;
 document.getElementById('graphSearchInput').addEventListener('input',e=>{
