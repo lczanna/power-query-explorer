@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Power Query Explorer</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='12'%20fill='%230f172a'/%3E%3Crect%20x='6'%20y='6'%20width='52'%20height='52'%20rx='10'%20fill='%2314b8a6'/%3E%3Ctext%20x='32'%20y='41'%20font-size='24'%20text-anchor='middle'%20fill='%230b1020'%20font-family='Arial,sans-serif'%20font-weight='700'%3EPQ%3C/text%3E%3C/svg%3E">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:;">
     <script>/* JSZip v3.10.1 | (c) Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso | MIT License */
 /*!
@@ -55,45 +56,54 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
 </script>
     <style>
         :root {
-            --bg-deep: #080b14;
-            --bg-primary: #0c1021;
-            --bg-secondary: #111827;
-            --bg-tertiary: #1a2236;
-            --bg-elevated: #1e293b;
-            --border-color: #1e3a5f;
-            --border-subtle: #162032;
-            --text-primary: #e2e8f0;
-            --text-secondary: #94a3b8;
-            --text-muted: #64748b;
-            --text-dim: #475569;
-            --accent-teal: #00d4aa;
-            --accent-teal-dim: rgba(0, 212, 170, 0.15);
-            --accent-blue: #38bdf8;
-            --accent-gold: #f59e0b;
-            --accent-gold-dim: rgba(245, 158, 11, 0.12);
-            --accent-violet: #a78bfa;
-            --accent-rose: #fb7185;
-            --accent-rose-dim: rgba(251, 113, 133, 0.12);
-            --accent-orange: #fb923c;
-            --accent-pink: #f472b6;
+            --bg-deep: #0a1220;
+            --bg-primary: #0f1a2c;
+            --bg-secondary: #152136;
+            --bg-tertiary: #1b2a43;
+            --bg-elevated: #223352;
+            --border-color: #2b456d;
+            --border-subtle: #223552;
+            --text-primary: #e6edf8;
+            --text-secondary: #a8b9d4;
+            --text-muted: #7f93b2;
+            --text-dim: #5d6f8a;
+            --accent-teal: #25c2ad;
+            --accent-teal-dim: rgba(37, 194, 173, 0.16);
+            --accent-blue: #5aa8ff;
+            --accent-gold: #e9a22f;
+            --accent-gold-dim: rgba(233, 162, 47, 0.13);
+            --accent-violet: #9ba8ff;
+            --accent-rose: #fb8295;
+            --accent-rose-dim: rgba(251, 130, 149, 0.12);
+            --accent-orange: #f0a25b;
+            --accent-pink: #f198bc;
             --radius-sm: 6px; --radius-md: 10px; --radius-lg: 14px; --radius-xl: 20px;
-            --shadow-glow: 0 0 20px rgba(0,212,170,0.1);
-            --shadow-lg: 0 8px 32px rgba(0,0,0,0.5);
+            --shadow-glow: 0 8px 26px rgba(90, 168, 255, 0.12);
+            --shadow-lg: 0 20px 46px rgba(6, 12, 22, 0.55);
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-            background: var(--bg-deep); color: var(--text-primary);
+            font-family: 'IBM Plex Sans', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            background: radial-gradient(160% 90% at 15% 0%, #122643 0%, var(--bg-deep) 48%);
+            color: var(--text-primary);
             min-height: 100vh; line-height: 1.5; overflow-x: hidden;
         }
         body::before {
             content: ''; position: fixed; inset: 0;
-            background-image: radial-gradient(circle at 1px 1px, rgba(0,212,170,0.03) 1px, transparent 0);
-            background-size: 40px 40px; pointer-events: none; z-index: 0;
+            background:
+                linear-gradient(to bottom, rgba(90,168,255,0.09), transparent 26%),
+                radial-gradient(circle at 1px 1px, rgba(90,168,255,0.05) 1px, transparent 0);
+            background-size: 100% 100%, 42px 42px;
+            pointer-events: none; z-index: 0;
         }
-        .container { max-width: 1440px; margin: 0 auto; padding: 20px 28px; position: relative; z-index: 1; }
+        .container { max-width: 1440px; margin: 0 auto; padding: 20px 28px 26px; position: relative; z-index: 1; }
 
-        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--border-subtle); }
+        header {
+            display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
+            padding: 16px 18px; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+            background: linear-gradient(135deg, rgba(14,27,48,0.9), rgba(14,27,48,0.62));
+            box-shadow: 0 10px 30px rgba(5, 10, 20, 0.35);
+        }
         .logo { display: flex; align-items: center; gap: 14px; }
         .logo-icon {
             width: 40px; height: 40px;
@@ -120,6 +130,22 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
         .reset-btn:hover { background: var(--bg-elevated); color: var(--text-primary); border-color: var(--accent-teal); }
         .reset-btn svg { width: 14px; height: 14px; }
         .reset-btn.visible { display: inline-flex; }
+
+        .offline-banner {
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            margin-bottom: 18px; padding: 10px 14px;
+            border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+            background: rgba(19, 34, 56, 0.7); color: var(--text-secondary);
+            font-size: 12.5px;
+        }
+        .offline-copy code { color: var(--accent-blue); font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace; }
+        .download-link {
+            flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+            padding: 7px 12px; border-radius: var(--radius-sm);
+            background: rgba(90, 168, 255, 0.14); border: 1px solid rgba(90, 168, 255, 0.45);
+            color: #c9e2ff; text-decoration: none; font-size: 12px; font-weight: 600;
+        }
+        .download-link:hover { background: rgba(90, 168, 255, 0.24); }
 
         .drop-zone {
             border: 2px dashed var(--border-color); border-radius: var(--radius-lg);
@@ -248,9 +274,16 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
         .query-code .fn { color:var(--accent-blue); }
         .query-code .num { color:var(--accent-orange); }
 
-        .prompt-section { margin-top:16px; padding:16px; background:var(--bg-secondary); border-radius:var(--radius-lg); border:1px solid var(--border-subtle); }
+        .prompt-section { margin:0 0 16px; padding:16px; background:var(--bg-secondary); border-radius:var(--radius-lg); border:1px solid var(--border-subtle); }
+        .prompt-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:8px; }
         .prompt-section h3 { font-size:13px; margin-bottom:10px; display:flex; align-items:center; gap:8px; color:var(--text-secondary); font-weight:500; }
+        .prompt-head h3 { margin-bottom:0; }
         .prompt-section h3 svg { color:var(--accent-gold); }
+        .prompt-pill {
+            padding:5px 10px; border:1px solid rgba(37,194,173,0.45); border-radius:999px;
+            background: rgba(37,194,173,0.12); color: #9fe7dc; font-size: 11px; font-weight: 600;
+        }
+        .prompt-help { margin-bottom:10px; color:var(--text-muted); font-size:12px; }
         .prompt-templates { display:flex; gap:8px; flex-wrap:wrap; }
         .prompt-template { padding:7px 14px; background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); font-size:12px; color:var(--text-muted); cursor:pointer; transition:all 0.15s; font-family:inherit; font-weight:500; }
         .prompt-template:hover { border-color:var(--accent-gold); color:var(--accent-gold); background:var(--accent-gold-dim); }
@@ -279,6 +312,7 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
         @media (max-width:768px) {
             .container { padding:14px; }
             header { flex-direction:column; gap:10px; align-items:flex-start; }
+            .offline-banner { flex-direction:column; align-items:flex-start; }
             .stats-bar { flex-wrap:wrap; }
             .stat { min-width:120px; }
             #graph-container { height:360px; }
@@ -302,17 +336,24 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
                 </button>
                 <div class="privacy-badge">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                    100% local &mdash; no network needed
+                    100% local, no network needed
                 </div>
             </div>
         </header>
+
+        <section class="offline-banner">
+            <div class="offline-copy">
+                <strong>Offline-ready:</strong> download this single <code>power-query-explorer.html</code> file and run it locally in your browser.
+            </div>
+            <a class="download-link" href="power-query-explorer.html" download>Download HTML</a>
+        </section>
 
         <div class="drop-zone" id="dropZone">
             <div class="drop-zone-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             </div>
             <h2>Drop your files here</h2>
-            <p>Drag Excel files &mdash; or an entire folder</p>
+            <p>Drag Excel files or an entire folder</p>
             <div class="file-types">
                 <span class="file-type-badge">.xlsx</span>
             </div>
@@ -327,6 +368,19 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
         </div>
 
         <div class="main-content" id="mainContent">
+            <div class="prompt-section" id="promptSection">
+                <div class="prompt-head">
+                    <h3><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/></svg> LLM Prompt Templates</h3>
+                    <div class="prompt-pill">Click to copy prompt + selected M code</div>
+                </div>
+                <p class="prompt-help">Each template copies the selected queries from the Code tab together with the prompt text.</p>
+                <div class="prompt-templates">
+                    <button class="prompt-template" data-prompt="analyze">Analyze dependencies &amp; consolidations</button>
+                    <button class="prompt-template" data-prompt="optimize">Find performance optimizations</button>
+                    <button class="prompt-template" data-prompt="document">Generate documentation</button>
+                    <button class="prompt-template" data-prompt="errors">Identify potential errors</button>
+                </div>
+            </div>
             <div class="file-list" id="fileList"></div>
             <div class="stats-bar">
                 <div class="stat"><span class="stat-value" id="statFiles">0</span><span class="stat-label">Files</span></div>
@@ -379,15 +433,6 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
                         <li>Very unusual DataMashup/customXml variants may fail to parse.</li>
                         <li>Only <code>.xlsx</code> workbooks are supported.</li>
                     </ul>
-                </div>
-            </div>
-            <div class="prompt-section">
-                <h3><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/></svg> LLM Prompt Templates</h3>
-                <div class="prompt-templates">
-                    <button class="prompt-template" data-prompt="analyze">Analyze dependencies &amp; consolidations</button>
-                    <button class="prompt-template" data-prompt="optimize">Find performance optimizations</button>
-                    <button class="prompt-template" data-prompt="document">Generate documentation</button>
-                    <button class="prompt-template" data-prompt="errors">Identify potential errors</button>
                 </div>
             </div>
             <div class="keyboard-hints">
@@ -684,11 +729,11 @@ function getSelCode(prompt){
     return o.trim();
 }
 
-async function copyClip(t){
+async function copyClip(t,msg){
     if(!t){showToast('No queries selected','warning');return;}
     try{await navigator.clipboard.writeText(t);}
     catch(e){const ta=document.createElement('textarea');ta.value=t;ta.style.cssText='position:fixed;opacity:0';document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);}
-    showToast('Copied to clipboard!','success');
+    showToast(msg||'Copied to clipboard!','success');
 }
 
 // ═══ File Processing ═══
@@ -822,7 +867,7 @@ document.getElementById('selectAllBtn').addEventListener('click',()=>{
     updSel();
 });
 
-document.querySelectorAll('.prompt-template').forEach(b=>{b.addEventListener('click',()=>copyClip(getSelCode(PROMPT_TEMPLATES[b.dataset.prompt])));});
+document.querySelectorAll('.prompt-template').forEach(b=>{b.addEventListener('click',()=>copyClip(getSelCode(PROMPT_TEMPLATES[b.dataset.prompt]),'Prompt and selected M code copied'));});
 
 // Graph controls
 document.getElementById('graphZoomIn').addEventListener('click',()=>{if(appState.cyInstance)appState.cyInstance.zoom(appState.cyInstance.zoom()*1.3);});
