@@ -52,7 +52,7 @@ See `scripts/README.md` for commands.
 
 ### GitHub Pages
 
-The repo is configured to publish from `master` branch root (`/`).
+The repo is configured to publish from `main` branch root (`/`).
 
 Production URL:
 
