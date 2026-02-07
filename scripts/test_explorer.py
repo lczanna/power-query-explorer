@@ -735,6 +735,7 @@ def main():
     sys.exit(0 if FAIL == 0 else 1)
 
 def _run_tests():
+    global FAIL, ERRORS
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(

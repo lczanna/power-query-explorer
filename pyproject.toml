@@ -1,7 +1,7 @@
 [project]
 name = "power-query-explorer"
 version = "0.1.0"
-description = "Add your description here"
+description = "Browser-based Power Query M extractor and visualizer with helper scripts for fixtures and tests"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
