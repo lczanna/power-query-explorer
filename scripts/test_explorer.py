@@ -21,12 +21,22 @@ import os
 import sys
 import json
 import time
+import subprocess
+import socket
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
 HTML_PATH = Path(__file__).resolve().parent.parent / "power-query-explorer.html"
 TEST_DIR = Path(__file__).resolve().parent.parent / "data" / "test-files"
-BASE_URL = "http://localhost:8765/power-query-explorer.html"
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+
+def find_free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        return s.getsockname()[1]
+
+PORT = find_free_port()
+BASE_URL = f"http://localhost:{PORT}/power-query-explorer.html"
 
 PASS = 0
 FAIL = 0
@@ -81,7 +91,7 @@ def test_page_load(page):
     badge = page.locator(".privacy-badge")
     result("Privacy badge visible", badge.is_visible())
     badge_text = badge.inner_text()
-    result("Privacy text says 'Files stay in your browser'", "Files stay in your browser" in badge_text, badge_text)
+    result("Privacy text says '100% local'", "100% local" in badge_text, badge_text)
 
     # Reset button hidden
     reset = page.locator("#resetBtn")
@@ -94,7 +104,7 @@ def test_page_load(page):
 
 def test_simple_query(page):
     """Test single query file parsing."""
-    print("\n━━━ Simple Query (1 query) ━━━")
+    print("\n━━━ Simple Query (3 queries) ━━━")
 
     page.goto(BASE_URL)
     page.wait_for_load_state("networkidle")
@@ -108,7 +118,7 @@ def test_simple_query(page):
     result("Files count = 1", files_stat == "1", f"Got: {files_stat}")
 
     queries_stat = page.locator("#statQueries").inner_text()
-    result("Queries count = 1", queries_stat == "1", f"Got: {queries_stat}")
+    result("Queries count = 3", queries_stat == "3", f"Got: {queries_stat}")
 
     # File chip
     chips = page.locator(".file-chip")
@@ -116,18 +126,20 @@ def test_simple_query(page):
     chip_text = chips.first.inner_text()
     result("File chip shows 'simple_query.xlsx'", "simple_query.xlsx" in chip_text, chip_text)
 
-    # Query name in code panel — switch to code tab first
+    # Query names in code panel — switch to code tab first
     page.locator('.tab[data-tab="code"]').click()
     page.wait_for_timeout(200)
     qnames = page.locator(".query-name")
-    result("One query name shown", qnames.count() == 1)
-    result("Query name is 'SalesData'", qnames.first.inner_text() == "SalesData", qnames.first.inner_text())
+    result("Three query names shown", qnames.count() == 3, f"Got: {qnames.count()}")
+    actual_names = {el.inner_text() for el in qnames.all()}
+    expected_names = {"Query1", "SalesData", "EdgeLookup"}
+    result("Expected query names present", actual_names == expected_names, f"Got: {actual_names}")
 
-    # Code block present
+    # Code blocks present
     code_blocks = page.locator(".query-code")
-    result("One code block shown", code_blocks.count() == 1)
-    code_text = code_blocks.first.inner_text()
-    result("Code contains 'Excel.CurrentWorkbook'", "Excel.CurrentWorkbook" in code_text, code_text[:80])
+    result("Three code blocks shown", code_blocks.count() == 3, f"Got: {code_blocks.count()}")
+    all_code = "\n".join(code_blocks.nth(i).inner_text() for i in range(code_blocks.count()))
+    result("Code contains cross-file File.Contents reference", 'File.Contents("edge_cases.xlsx")' in all_code, all_code[:200])
 
     # Error log should NOT be visible (successful parse)
     result("No error log visible", not page.locator("#errorLog").is_visible())
@@ -138,14 +150,14 @@ def test_simple_query(page):
 
 def test_multi_query(page):
     """Test multi-query file with dependencies."""
-    print("\n━━━ Multi Query (4 queries + deps) ━━━")
+    print("\n━━━ Multi Query (5 queries + deps) ━━━")
 
     page.goto(BASE_URL)
     page.wait_for_load_state("networkidle")
     upload_files(page, ["multi_query.xlsx"])
 
     queries_stat = page.locator("#statQueries").inner_text()
-    result("Queries count = 4", queries_stat == "4", f"Got: {queries_stat}")
+    result("Queries count = 5", queries_stat == "5", f"Got: {queries_stat}")
 
     deps_stat = page.locator("#statDeps").inner_text()
     deps_val = int(deps_stat)
@@ -155,9 +167,9 @@ def test_multi_query(page):
     page.locator('.tab[data-tab="code"]').click()
     page.wait_for_timeout(200)
 
-    expected_names = {"RawOrders", "Customers", "OrdersWithCustomers", "SalesSummary"}
+    expected_names = {"Query1", "RawOrders", "Customers", "OrdersWithCustomers", "SalesSummary"}
     actual_names = {el.inner_text() for el in page.locator(".query-name").all()}
-    result("All 4 query names present", expected_names == actual_names,
+    result("All 5 query names present", expected_names == actual_names,
            f"Expected: {expected_names}, Got: {actual_names}")
 
     # Check dependency arrows shown
@@ -185,7 +197,7 @@ def test_complex_code(page):
     upload_files(page, ["complex_code.xlsx"])
 
     queries_stat = page.locator("#statQueries").inner_text()
-    result("Queries count = 2", queries_stat == "2", f"Got: {queries_stat}")
+    result("Queries count = 4", queries_stat == "4", f"Got: {queries_stat}")
 
     page.locator('.tab[data-tab="code"]').click()
     page.wait_for_timeout(200)
@@ -214,7 +226,7 @@ def test_edge_cases(page):
     upload_files(page, ["edge_cases.xlsx"])
 
     queries_stat = page.locator("#statQueries").inner_text()
-    result("Queries count = 6", queries_stat == "6", f"Got: {queries_stat}")
+    result("Queries count = 7", queries_stat == "7", f"Got: {queries_stat}")
 
     page.locator('.tab[data-tab="code"]').click()
     page.wait_for_timeout(200)
@@ -232,27 +244,28 @@ def test_edge_cases(page):
 
 
 def test_stress(page):
-    """Test stress file with 25 queries."""
-    print("\n━━━ Stress Test (25 queries) ━━━")
+    """Test stress file with 26 queries."""
+    print("\n━━━ Stress Test (26 queries) ━━━")
 
     page.goto(BASE_URL)
     page.wait_for_load_state("networkidle")
     upload_files(page, ["stress_test.xlsx"])
 
     queries_stat = page.locator("#statQueries").inner_text()
-    result("Queries count = 25", queries_stat == "25", f"Got: {queries_stat}")
+    result("Queries count = 26", queries_stat == "26", f"Got: {queries_stat}")
 
     page.locator('.tab[data-tab="code"]').click()
     page.wait_for_timeout(200)
 
     qnames = page.locator(".query-name")
-    result("25 query name elements rendered", qnames.count() == 25, f"Got: {qnames.count()}")
+    result("26 query name elements rendered", qnames.count() == 26, f"Got: {qnames.count()}")
 
     # Check specific queries exist
     names = {el.inner_text() for el in qnames.all()}
     for prefix in ["DataSource", "Transform", "Merge", "Aggregate", "Output"]:
         found = sum(1 for n in names if n.startswith(prefix))
         result(f"5 '{prefix}*' queries found", found == 5, f"Got: {found}")
+    result("One 'Query1' query found", "Query1" in names, f"Got: {names}")
 
     # Token estimate should be present and reasonable
     tokens = page.locator("#statTokens").inner_text()
@@ -275,17 +288,16 @@ def test_no_queries(page):
     # Drop zone should reappear
     result("Drop zone visible again", page.locator("#dropZone").is_visible())
 
-    # Error log should be visible
+    # Error log stays hidden for this expected condition
     error_log = page.locator("#errorLog")
-    result("Error log visible", error_log.is_visible())
+    result("Error log hidden", not error_log.is_visible())
 
-    # Toast warning
-    toast = page.locator(".toast")
-    toast_visible = toast.is_visible()
-    result("Warning toast shown", toast_visible)
-    if toast_visible:
-        result("Toast mentions no queries found", "no power query" in toast.inner_text().lower(),
-               toast.inner_text())
+    # Bottom notice shows expected message
+    notice = page.locator("#bottomNotice")
+    result("Bottom notice visible", notice.is_visible())
+    if notice.is_visible():
+        result("Bottom notice mentions no queries found", "no power query" in notice.inner_text().lower(),
+               notice.inner_text())
 
 
 def test_multi_file_upload(page):
@@ -300,7 +312,7 @@ def test_multi_file_upload(page):
     result("Files count = 2", files_stat == "2", f"Got: {files_stat}")
 
     queries_stat = page.locator("#statQueries").inner_text()
-    result("Queries count = 5 (1+4)", queries_stat == "5", f"Got: {queries_stat}")
+    result("Queries count = 8 (3+5)", queries_stat == "8", f"Got: {queries_stat}")
 
     # Two file chips
     chips = page.locator(".file-chip")
@@ -337,7 +349,7 @@ def test_select_all_and_copy(page):
 
     # Copy button text shows count
     copy_text = page.locator("#copyBtnText").inner_text()
-    result("Copy button shows count", "4" in copy_text, copy_text)
+    result("Copy button shows count", "5" in copy_text, copy_text)
 
     # Click Select All (should deselect all since all are already checked)
     page.locator("#selectAllBtn").click()
@@ -584,8 +596,8 @@ def test_mixed_valid_invalid(page):
     files_stat = page.locator("#statFiles").inner_text()
     result("Files count = 1 (only valid file)", files_stat == "1", f"Got: {files_stat}")
 
-    # Error log should be visible for the invalid file
-    result("Error log visible for no-query file", page.locator("#errorLog").is_visible())
+    # Bottom notice should be visible for the no-query file
+    result("Bottom notice visible for no-query file", page.locator("#bottomNotice").is_visible())
 
 
 def test_individual_checkbox(page):
@@ -605,13 +617,13 @@ def test_individual_checkbox(page):
     page.wait_for_timeout(200)
 
     copy_text = page.locator("#copyBtnText").inner_text()
-    result("Copy count decremented after uncheck", "3" in copy_text, copy_text)
+    result("Copy count decremented after uncheck", "4" in copy_text, copy_text)
 
     # Re-check
     cbs.first.check()
     page.wait_for_timeout(200)
     copy_text2 = page.locator("#copyBtnText").inner_text()
-    result("Copy count restored after re-check", "4" in copy_text2, copy_text2)
+    result("Copy count restored after re-check", "5" in copy_text2, copy_text2)
 
 
 def test_token_estimation(page):
@@ -626,8 +638,8 @@ def test_token_estimation(page):
     result("Token text starts with ~", tokens_text.startswith("~"))
 
     token_val = int(tokens_text.replace("~", "").replace(",", ""))
-    # 25 queries with code, should be at least a few hundred tokens
-    result("Token estimate > 200 for 25 queries", token_val > 200, f"Got: {token_val}")
+    # 26 queries with code, should be at least a few hundred tokens
+    result("Token estimate > 200 for 26 queries", token_val > 200, f"Got: {token_val}")
     result("Token estimate < 100000 (reasonable upper bound)", token_val < 100000, f"Got: {token_val}")
 
 
@@ -696,7 +708,33 @@ def main():
     print("╔══════════════════════════════════════════╗")
     print("║  Power Query Explorer — Test Suite       ║")
     print("╚══════════════════════════════════════════╝")
+    print(f"  Server: localhost:{PORT}")
 
+    # Start HTTP server
+    server = subprocess.Popen(
+        ["python3", "-m", "http.server", str(PORT)],
+        cwd=str(PROJECT_DIR),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    time.sleep(1.5)  # Wait for server startup
+
+    try:
+        _run_tests()
+    finally:
+        server.terminate()
+        server.wait(timeout=5)
+
+    print(f"\n{'═'*46}")
+    print(f"  Results: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
+    if ERRORS:
+        print(f"\n  Failures:")
+        for e in ERRORS:
+            print(f"    \033[31m•\033[0m {e}")
+    print()
+
+    sys.exit(0 if FAIL == 0 else 1)
+
+def _run_tests():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
@@ -743,16 +781,6 @@ def main():
                 page.close()
 
         browser.close()
-
-    print(f"\n{'═'*46}")
-    print(f"  Results: \033[32m{PASS} passed\033[0m, \033[31m{FAIL} failed\033[0m")
-    if ERRORS:
-        print(f"\n  Failures:")
-        for e in ERRORS:
-            print(f"    \033[31m•\033[0m {e}")
-    print()
-
-    sys.exit(0 if FAIL == 0 else 1)
 
 
 if __name__ == "__main__":

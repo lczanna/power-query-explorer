@@ -1,192 +1,189 @@
 """
-Generate test Excel (.xlsx) files with embedded Power Query M code.
+Generate test Excel (.xlsx) files with real, Excel-visible Power Query metadata.
 
-The Power Query M code is stored in a DataMashup binary blob inside the xlsx ZIP.
-The DataMashup binary contains:
-  - A header with version info and size
-  - An inner ZIP containing Formulas/Section1.m with the M code
-  - The M code uses the format: section Section1; shared QueryName = let ... in ...;
+Why this script uses a template:
+- A workbook that shows queries in Excel requires more than just DataMashup.
+- It also needs related connection/query table/customXml parts.
+- The template file contains that valid structure, and this script only swaps
+  Formulas/Section1.m inside DataMashup.
 
 Files are saved to data/test-files/.
 """
 
+import base64
 import io
 import os
+import shutil
 import struct
 import zipfile
+from xml.etree import ElementTree as ET
 
 import openpyxl
 
-OUTPUT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data",
-    "test-files",
-)
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUTPUT_DIR = os.path.join(ROOT_DIR, "data", "test-files")
+TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "query-template.xlsx")
+
+DATAMASHUP_XML_PATH = "customXml/item1.xml"
+DATAMASHUP_NS = "http://schemas.microsoft.com/DataMashup"
 
 
-def build_datamashup_blob(m_code: str) -> bytes:
-    """Build a DataMashup binary blob wrapping M code.
-
-    The DataMashup format used by Excel:
-      - 4 bytes: version (0x00 0x00 0x00 0x00)
-      - 4 bytes: size of the package part (little-endian uint32)
-      - N bytes: the inner ZIP package (containing Formulas/Section1.m)
-      - After the ZIP: permission metadata (we add minimal trailing bytes)
-    """
-    # Create the inner ZIP containing the M code
-    inner_zip_buf = io.BytesIO()
-    with zipfile.ZipFile(inner_zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # Content types file (required for valid OPC package)
-        content_types = (
-            '<?xml version="1.0" encoding="utf-8"?>'
-            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-            '<Default Extension="m" ContentType="application/x-ms-m"/>'
-            '<Default Extension="xml" ContentType="application/xml"/>'
-            "</Types>"
-        )
-        zf.writestr("[Content_Types].xml", content_types)
-
-        # The M code file
-        zf.writestr("Formulas/Section1.m", m_code)
-
-    inner_zip_bytes = inner_zip_buf.getvalue()
-
-    # Build the DataMashup blob
-    blob = io.BytesIO()
-
-    # Version: 4 zero bytes
-    blob.write(b"\x00\x00\x00\x00")
-
-    # Size of the package part (little-endian uint32)
-    blob.write(struct.pack("<I", len(inner_zip_bytes)))
-
-    # The inner ZIP data
-    blob.write(inner_zip_bytes)
-
-    # Minimal trailing permission/metadata section
-    # (4 bytes size = 0 for empty permissions block)
-    blob.write(struct.pack("<I", 0))
-
-    return blob.getvalue()
+def _decode_xml(raw: bytes) -> str:
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16")
+    return raw.decode("utf-8")
 
 
-def inject_datamashup(xlsx_path: str, datamashup_blob: bytes) -> None:
-    """Inject a DataMashup blob into an xlsx file as customXml/item1.bin."""
-    # Read existing xlsx into memory
-    with open(xlsx_path, "rb") as f:
-        xlsx_bytes = f.read()
+def _read_datamashup_blob(item1_xml: bytes):
+    xml_text = _decode_xml(item1_xml)
+    root = ET.fromstring(xml_text)
+    blob = base64.b64decode((root.text or "").strip())
+
+    if len(blob) < 8:
+        raise ValueError("DataMashup blob is too short")
+
+    version, pkg_len = struct.unpack("<II", blob[:8])
+    if len(blob) < 8 + pkg_len:
+        raise ValueError("DataMashup package length is invalid")
+
+    package = blob[8 : 8 + pkg_len]
+    trailer = blob[8 + pkg_len :]
+    return root, version, package, trailer
+
+
+def _replace_section1_m(package_bytes: bytes, m_code: str) -> bytes:
+    in_buf = io.BytesIO(package_bytes)
+    out_buf = io.BytesIO()
+
+    with zipfile.ZipFile(in_buf, "r") as zin:
+        names = zin.namelist()
+        parts = {name: zin.read(name) for name in names}
+
+    parts["Formulas/Section1.m"] = m_code.encode("utf-8")
+
+    with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        written = set()
+        for name in names:
+            if name in parts and name not in written:
+                zout.writestr(name, parts[name])
+                written.add(name)
+        for name, data in parts.items():
+            if name not in written:
+                zout.writestr(name, data)
+
+    return out_buf.getvalue()
+
+
+def _build_datamashup_xml(root: ET.Element, version: int, package: bytes, trailer: bytes) -> bytes:
+    ET.register_namespace("", DATAMASHUP_NS)
+    blob = struct.pack("<I", version) + struct.pack("<I", len(package)) + package + trailer
+    root.text = base64.b64encode(blob).decode("ascii")
+    return ET.tostring(root, encoding="utf-16", xml_declaration=True)
+
+
+def create_query_workbook(path: str, m_code: str) -> None:
+    """Create a query-enabled workbook from template and replace Section1.m."""
+    if not os.path.exists(TEMPLATE_PATH):
+        raise FileNotFoundError(f"Missing template workbook: {TEMPLATE_PATH}")
+
+    shutil.copy2(TEMPLATE_PATH, path)
+
+    with zipfile.ZipFile(path, "r") as zin:
+        order = [name for name in zin.namelist() if not name.endswith("/")]
+        parts = {name: zin.read(name) for name in order}
+
+    root, version, package, trailer = _read_datamashup_blob(parts[DATAMASHUP_XML_PATH])
+    package = _replace_section1_m(package, m_code)
+    parts[DATAMASHUP_XML_PATH] = _build_datamashup_xml(root, version, package, trailer)
 
     out_buf = io.BytesIO()
-    with zipfile.ZipFile(io.BytesIO(xlsx_bytes), "r") as zin:
-        with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
-            # Copy all existing entries
-            for item in zin.infolist():
-                data = zin.read(item.filename)
-                zout.writestr(item, data)
+    with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        written = set()
+        for name in order:
+            if name in parts and name not in written:
+                zout.writestr(name, parts[name])
+                written.add(name)
+        for name, data in parts.items():
+            if name not in written:
+                zout.writestr(name, data)
 
-            # Add the DataMashup blob
-            zout.writestr("customXml/item1.bin", datamashup_blob)
-
-            # Add a relationship file so Excel knows about customXml
-            rels_content = (
-                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-                '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml" Target="../customXml/item1.bin"/>'
-                "</Relationships>"
-            )
-            # Only add if not already present
-            if "customXml/_rels/item1.bin.rels" not in [
-                i.filename for i in zin.infolist()
-            ]:
-                zout.writestr("customXml/_rels/item1.bin.rels", rels_content)
-
-    with open(xlsx_path, "wb") as f:
+    with open(path, "wb") as f:
         f.write(out_buf.getvalue())
 
 
-def create_base_xlsx(path: str) -> None:
-    """Create a minimal valid xlsx file with openpyxl."""
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Sheet1"
-    ws["A1"] = "Test Data"
-    wb.save(path)
-
-
 # ============================================================
-# Test File Definitions
+# M Code Definitions
 # ============================================================
 
 
-def create_simple_query():
-    """1. simple_query.xlsx - One simple Power Query."""
-    path = os.path.join(OUTPUT_DIR, "simple_query.xlsx")
-    create_base_xlsx(path)
-
-    m_code = (
+def m_simple_query() -> str:
+    return (
         "section Section1;\n"
-        "shared SalesData = let\n"
-        '    Source = Excel.CurrentWorkbook(){[Name="Table1"]}[Content],\n'
-        '    ChangedType = Table.TransformColumnTypes(Source, {{"Amount", type number}, {"Date", type date}}),\n'
-        '    FilteredRows = Table.SelectRows(ChangedType, each [Amount] > 100)\n'
+        "shared #\"Query1\" = let\n"
+        '    Source = #table({"OrderID", "CustomerID", "Amount", "OrderDate", "Category"}, {{1001, 1, 240.5, #date(2024, 1, 4), "Hardware"}, {1002, 2, 180.0, #date(2024, 1, 5), "Services"}, {1003, 1, 95.0, #date(2024, 1, 10), "Returns"}, {1004, 3, 420.9, #date(2024, 1, 12), "Hardware"}, {1005, 4, 75.2, #date(2024, 1, 13), "Returns"}, {1006, 2, 330.0, #date(2024, 2, 1), "Services"}, {1007, 5, 510.4, #date(2024, 2, 6), "Hardware"}, {1008, 4, 125.5, #date(2024, 2, 10), "Accessories"}, {1009, 3, 290.0, #date(2024, 2, 12), "Hardware"}, {1010, 6, 60.0, #date(2024, 2, 14), "Returns"}, {1011, 5, 700.3, #date(2024, 2, 21), "Hardware"}, {1012, 7, 155.8, #date(2024, 2, 25), "Services"}})\n'
         "in\n"
-        "    FilteredRows;"
+        "    Source;\n"
+        "shared SalesData = let\n"
+        "    Source = Query1,\n"
+        '    ChangedType = Table.TransformColumnTypes(Source, {{"Amount", type number}, {"OrderDate", type date}, {"Category", type text}}),\n'
+        '    FilteredRows = Table.SelectRows(ChangedType, each [Amount] > 100 and [Category] <> "Returns"),\n'
+        '    SortedRows = Table.Sort(FilteredRows, {{"OrderDate", Order.Ascending}})\n'
+        "in\n"
+        "    SortedRows;\n"
+        "shared EdgeLookup = let\n"
+        '    Source = Excel.Workbook(File.Contents("edge_cases.xlsx"), null, true)\n'
+        "in\n"
+        "    Source;\n"
     )
 
-    blob = build_datamashup_blob(m_code)
-    inject_datamashup(path, blob)
-    print(f"  Created: {path}")
 
-
-def create_multi_query():
-    """2. multi_query.xlsx - Multiple queries with dependencies."""
-    path = os.path.join(OUTPUT_DIR, "multi_query.xlsx")
-    create_base_xlsx(path)
-
-    m_code = (
+def m_multi_query() -> str:
+    return (
         "section Section1;\n"
+        "shared #\"Query1\" = let\n"
+        '    Source = Excel.Workbook(File.Contents("simple_query.xlsx"), null, true)\n'
+        "in\n"
+        "    Source;\n"
         "shared RawOrders = let\n"
-        '    Source = Csv.Document(File.Contents("C:\\Data\\orders.csv")),\n'
-        "    PromotedHeaders = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),\n"
-        '    ChangedType = Table.TransformColumnTypes(PromotedHeaders, {{"OrderID", Int64.Type}, {"CustomerID", Int64.Type}, {"Amount", type number}})\n'
+        '    Source = #table({"OrderID", "CustomerID", "Amount", "Priority"}, {{2001, 1, 240.5, "High"}, {2002, 2, 180.0, "Low"}, {2003, 1, 95.0, "Low"}, {2004, 3, 420.9, "High"}, {2005, 4, 75.2, "Low"}, {2006, 2, 330.0, "High"}, {2007, 5, 510.4, "High"}, {2008, 4, 125.5, "Low"}, {2009, 3, 290.0, "Medium"}, {2010, 6, 60.0, "Low"}, {2011, 5, 700.3, "High"}, {2012, 7, 155.8, "Medium"}}),\n'
+        '    ChangedType = Table.TransformColumnTypes(Source, {{"OrderID", Int64.Type}, {"CustomerID", Int64.Type}, {"Amount", type number}, {"Priority", type text}})\n'
         "in\n"
         "    ChangedType;\n"
         "shared Customers = let\n"
-        '    Source = Csv.Document(File.Contents("C:\\Data\\customers.csv")),\n'
-        "    PromotedHeaders = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),\n"
-        '    ChangedType = Table.TransformColumnTypes(PromotedHeaders, {{"CustomerID", Int64.Type}, {"Name", type text}, {"Region", type text}})\n'
+        '    Source = #table({"CustomerID", "Name", "Region", "Segment"}, {{1, "Acme Corp", "West", "Enterprise"}, {2, "Bluebird LLC", "East", "SMB"}, {3, "Northwind", "North", "Enterprise"}, {4, "Fabrikam", "South", "Mid-Market"}, {5, "Contoso", "West", "Enterprise"}, {6, "Adventure Works", "East", "SMB"}, {7, "Tailspin Toys", "North", "SMB"}}),\n'
+        '    ChangedType = Table.TransformColumnTypes(Source, {{"CustomerID", Int64.Type}, {"Name", type text}, {"Region", type text}, {"Segment", type text}})\n'
         "in\n"
         "    ChangedType;\n"
         "shared OrdersWithCustomers = let\n"
         "    Source = RawOrders,\n"
         '    Merged = Table.NestedJoin(Source, {"CustomerID"}, Customers, {"CustomerID"}, "CustomerData", JoinKind.LeftOuter),\n'
-        '    Expanded = Table.ExpandTableColumn(Merged, "CustomerData", {"Name", "Region"})\n'
+        '    Expanded = Table.ExpandTableColumn(Merged, "CustomerData", {"Name", "Region", "Segment"})\n'
         "in\n"
         "    Expanded;\n"
         "shared SalesSummary = let\n"
         "    Source = OrdersWithCustomers,\n"
-        '    Grouped = Table.Group(Source, {"Region"}, {{"TotalSales", each List.Sum([Amount]), type number}, {"OrderCount", each Table.RowCount(_), Int64.Type}})\n'
+        '    Grouped = Table.Group(Source, {"Region"}, {{"TotalSales", each List.Sum([Amount]), type number}, {"OrderCount", each Table.RowCount(_), Int64.Type}, {"AvgOrder", each Number.Round(List.Average([Amount]), 2), type number}}),\n'
+        '    Sorted = Table.Sort(Grouped, {{"TotalSales", Order.Descending}})\n'
         "in\n"
-        "    Grouped;"
+        "    Sorted;\n"
     )
 
-    blob = build_datamashup_blob(m_code)
-    inject_datamashup(path, blob)
-    print(f"  Created: {path}")
 
-
-def create_complex_code():
-    """3. complex_code.xlsx - Complex M code with comments, nested lets, special chars."""
-    path = os.path.join(OUTPUT_DIR, "complex_code.xlsx")
-    create_base_xlsx(path)
-
-    m_code = (
+def m_complex_code() -> str:
+    return (
         "section Section1;\n"
+        "shared #\"Query1\" = let\n"
+        '    Source = #table({"SalesOrderID", "CustomerID", "TerritoryID", "Status", "TotalDue", "OrderDate"}, {{5001, 1, 1, "Open", 125.3, #date(2023, 1, 7)}, {5002, 2, 4, "Open", 840.0, #date(2023, 1, 9)}, {5003, 3, 8, "Cancelled", 400.5, #date(2023, 1, 12)}, {5004, 2, 11, "Open", 99.9, #date(2023, 2, 2)}, {5005, 4, 6, "Closed", 1520.2, #date(2023, 2, 9)}, {5006, 5, 2, null, 730.0, #date(2023, 2, 11)}, {5007, 6, 9, "Open", 0.0, #date(2023, 3, 1)}, {5008, 1, 3, "Closed", 275.8, #date(2023, 3, 5)}, {5009, 7, 7, "Open", 319.4, #date(2023, 3, 9)}, {5010, 8, 10, "Open", 450.2, #date(2023, 3, 11)}}),\n'
+        '    ChangedType = Table.TransformColumnTypes(Source, {{"SalesOrderID", Int64.Type}, {"CustomerID", Int64.Type}, {"TerritoryID", Int64.Type}, {"Status", type text}, {"TotalDue", type number}, {"OrderDate", type date}})\n'
+        "in\n"
+        "    ChangedType;\n"
+        "shared ExternalBaseline = let\n"
+        '    Source = Excel.Workbook(File.Contents("multi_query.xlsx"), null, true)\n'
+        "in\n"
+        "    Source;\n"
         "shared TransformPipeline = let\n"
-        "    // Load data from SQL Server\n"
-        '    Source = Sql.Database("server.example.com", "AdventureWorks", [Query=\n'
-        '        "SELECT * FROM Sales.SalesOrderHeader WHERE OrderDate >= \'2023-01-01\'"\n'
-        "    ]),\n"
+        "    // Load data from in-workbook query\n"
+        "    Source = Query1,\n"
         "\n"
         "    /* Multi-line comment:\n"
         "       This step filters for active orders\n"
@@ -227,33 +224,37 @@ def create_complex_code():
         'shared #"Start Date" = let\n'
         '    Source = #date(2023, 1, 1)\n'
         "in\n"
-        "    Source;"
+        "    Source;\n"
     )
 
-    blob = build_datamashup_blob(m_code)
-    inject_datamashup(path, blob)
-    print(f"  Created: {path}")
 
+def m_stress_test() -> str:
+    queries = [
+        (
+            "shared #\"Query1\" = let\n"
+            '    Source = Excel.Workbook(File.Contents("complex_code.xlsx"), null, true)\n'
+            "in\n"
+            "    Source"
+        )
+    ]
 
-def create_stress_test():
-    """4. stress_test.xlsx - 20+ queries for stress testing."""
-    path = os.path.join(OUTPUT_DIR, "stress_test.xlsx")
-    create_base_xlsx(path)
-
-    queries = []
-
-    # Base data source queries (5)
+    categories = ["Hardware", "Software", "Services", "Support"]
     for i in range(1, 6):
+        rows = []
+        for row_id in range(1, 61):
+            cat = categories[(row_id + i) % len(categories)]
+            rows.append(f"{{{row_id}, {row_id * (i + 4) + (i * 3)}, \"{cat}\"}}")
+        table_literal = (
+            '#table({"ID", "Value", "Category"}, {' + ", ".join(rows) + "})"
+        )
         queries.append(
             f"shared DataSource{i} = let\n"
-            f'    Source = Excel.CurrentWorkbook(){{[Name="Table{i}"]}}[Content],\n'
-            f"    ChangedType = Table.TransformColumnTypes(Source, "
-            f'{{{{\"ID\", Int64.Type}}, {{\"Value\", type number}}, {{\"Category\", type text}}}})\n'
+            f"    Source = {table_literal},\n"
+            f'    ChangedType = Table.TransformColumnTypes(Source, {{ {{"ID", Int64.Type}}, {{"Value", type number}}, {{"Category", type text}} }})\n'
             f"in\n"
             f"    ChangedType"
         )
 
-    # Transform queries that reference base data (5)
     for i in range(1, 6):
         queries.append(
             f"shared Transform{i} = let\n"
@@ -264,7 +265,6 @@ def create_stress_test():
             f"    Added"
         )
 
-    # Merge queries that combine transforms (5)
     for i in range(1, 6):
         j = (i % 5) + 1
         queries.append(
@@ -277,39 +277,104 @@ def create_stress_test():
             f"    Expanded"
         )
 
-    # Aggregation queries (5)
     for i in range(1, 6):
         queries.append(
             f"shared Aggregate{i} = let\n"
             f"    Source = Merge{i},\n"
-            f'    Grouped = Table.Group(Source, {{"Category"}}, '
-            f'{{{{\"Total\", each List.Sum([Value]), type number}}, '
-            f'{{\"Count\", each Table.RowCount(_), Int64.Type}}}}),\n'
-            f'    Sorted = Table.Sort(Grouped, {{{{\"Total\", Order.Descending}}}})\n'
+            f'    Grouped = Table.Group(Source, {{"Category"}}, {{ {{"Total", each List.Sum([Value]), type number}}, {{"Count", each Table.RowCount(_), Int64.Type}} }}),\n'
+            f'    Sorted = Table.Sort(Grouped, {{ {{"Total", Order.Descending}} }})\n'
             f"in\n"
             f"    Sorted"
         )
 
-    # Final output queries (5)
     for i in range(1, 6):
         queries.append(
             f"shared Output{i} = let\n"
             f"    Source = Aggregate{i},\n"
             f"    TopN = Table.FirstN(Source, 10),\n"
-            f'    Renamed = Table.RenameColumns(TopN, {{{{\"Total\", \"Grand Total {i}\"}}, {{\"Count\", \"Record Count {i}\"}}}})\n'
+            f'    Renamed = Table.RenameColumns(TopN, {{ {{"Total", "Grand Total {i}"}}, {{"Count", "Record Count {i}"}} }})\n'
             f"in\n"
             f"    Renamed"
         )
 
-    m_code = "section Section1;\n" + ";\n".join(queries) + ";"
+    return "section Section1;\n" + ";\n".join(queries) + ";"
 
-    blob = build_datamashup_blob(m_code)
-    inject_datamashup(path, blob)
+
+def m_edge_cases() -> str:
+    long_steps = "".join(
+        [
+            f'    Step{i} = Table.AddColumn({"Source" if i == 1 else f"Step{i-1}"}, "Col{i}", each [Units] * {i}),\\n'
+            for i in range(1, 21)
+        ]
+    )
+
+    return (
+        "section Section1;\n"
+        "shared #\"Query1\" = let\n"
+        '    Source = Excel.Workbook(File.Contents("simple_query.xlsx"), null, true)\n'
+        "in\n"
+        "    Source;\n"
+        'shared #"Revenue Report" = let\n'
+        '    Source = #table({"Product", "Revenue", "Quarter"}, {{"Widget A", 15000, "Q1"}, {"Widget B", 23100, "Q1"}, {"Widget C", 19850, "Q2"}, {"Widget A", 17600, "Q2"}, {"Widget D", 26400, "Q3"}, {"Widget B", 24550, "Q3"}})\n'
+        "in\n"
+        "    Source;\n"
+        "shared raw_data_import = let\n"
+        '    Source = #table({"Year", "Month", "Units", "Region"}, {{2024, 1, 18, "West"}, {2024, 2, 24, "East"}, {2024, 3, 31, "North"}, {2025, 1, 22, "West"}, {2025, 2, 29, "South"}, {2025, 3, 35, "East"}}),\n'
+        '    Headers = Table.TransformColumnTypes(Source, {{"Year", Int64.Type}, {"Month", Int64.Type}, {"Units", Int64.Type}, {"Region", type text}})\n'
+        "in\n"
+        "    Headers;\n"
+        'shared #"Year-to-Date (YTD) #1" = let\n'
+        "    Source = raw_data_import,\n"
+        "    Filtered = Table.SelectRows(Source, each [Year] = Date.Year(DateTime.LocalNow()))\n"
+        "in\n"
+        "    Filtered;\n"
+        "shared EmptyResult = let\n"
+        "    Source = null\n"
+        "in\n"
+        "    Source;\n"
+        "shared LongProcessing = let\n"
+        "    Source = raw_data_import,\n"
+        + long_steps
+        + "    Final = Table.Buffer(Step20)\n"
+        "in\n"
+        "    Final;\n"
+        'shared #"Donn\u00e9es_brutes" = let\n'
+        '    Source = #table({"Cle", "Montant", "Commentaire"}, {{"A1", 10.5, "Ligne initiale"}, {"B2", 22.0, "Donn\u00e9es test"}, {"C3", 35.75, "Valeur moyenne"}, {"D4", 41.2, "Fin de s\u00e9rie"}})\n'
+        "in\n"
+        "    Source;\n"
+    )
+
+
+# ============================================================
+# File Creators
+# ============================================================
+
+
+def create_simple_query():
+    path = os.path.join(OUTPUT_DIR, "simple_query.xlsx")
+    create_query_workbook(path, m_simple_query())
+    print(f"  Created: {path}")
+
+
+def create_multi_query():
+    path = os.path.join(OUTPUT_DIR, "multi_query.xlsx")
+    create_query_workbook(path, m_multi_query())
+    print(f"  Created: {path}")
+
+
+def create_complex_code():
+    path = os.path.join(OUTPUT_DIR, "complex_code.xlsx")
+    create_query_workbook(path, m_complex_code())
+    print(f"  Created: {path}")
+
+
+def create_stress_test():
+    path = os.path.join(OUTPUT_DIR, "stress_test.xlsx")
+    create_query_workbook(path, m_stress_test())
     print(f"  Created: {path}")
 
 
 def create_no_queries():
-    """5. no_queries.xlsx - Regular Excel with no Power Query."""
     path = os.path.join(OUTPUT_DIR, "no_queries.xlsx")
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -324,61 +389,15 @@ def create_no_queries():
 
 
 def create_edge_cases():
-    """6. edge_cases.xlsx - Query names with #, underscores, Unicode, and tricky patterns."""
     path = os.path.join(OUTPUT_DIR, "edge_cases.xlsx")
-    create_base_xlsx(path)
-
-    m_code = (
-        "section Section1;\n"
-        # Query name with # (quoted identifier)
-        'shared #"Revenue Report" = let\n'
-        '    Source = Excel.CurrentWorkbook(){[Name="Revenue"]}[Content]\n'
-        "in\n"
-        "    Source;\n"
-        # Query name with underscores
-        "shared raw_data_import = let\n"
-        '    Source = Csv.Document(File.Contents("data.csv")),\n'
-        "    Headers = Table.PromoteHeaders(Source, [PromoteAllScalars=true])\n"
-        "in\n"
-        "    Headers;\n"
-        # Query name with multiple # and spaces
-        'shared #"Year-to-Date (YTD) #1" = let\n'
-        "    Source = raw_data_import,\n"
-        "    Filtered = Table.SelectRows(Source, each [Year] = Date.Year(DateTime.LocalNow()))\n"
-        "in\n"
-        "    Filtered;\n"
-        # Short / minimal query (just a value)
-        "shared EmptyResult = let\n"
-        "    Source = null\n"
-        "in\n"
-        "    Source;\n"
-        # Query with very long code (repeated steps)
-        "shared LongProcessing = let\n"
-        '    Source = Excel.CurrentWorkbook(){[Name="BigTable"]}[Content],\n'
-        + "".join(
-            [
-                f'    Step{i} = Table.AddColumn({"Source" if i == 1 else f"Step{i-1}"}, "Col{i}", each [Value] * {i}),\n'
-                for i in range(1, 21)
-            ]
-        )
-        + "    Final = Table.Buffer(Step20)\n"
-        "in\n"
-        "    Final;\n"
-        # Query with Unicode in name
-        'shared #"Donn\u00e9es_brutes" = let\n'
-        '    Source = Excel.CurrentWorkbook(){[Name="Feuil1"]}[Content]\n'
-        "in\n"
-        "    Source;"
-    )
-
-    blob = build_datamashup_blob(m_code)
-    inject_datamashup(path, blob)
+    create_query_workbook(path, m_edge_cases())
     print(f"  Created: {path}")
 
 
 # ============================================================
 # Main
 # ============================================================
+
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
