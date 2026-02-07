@@ -206,6 +206,11 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
 
         .code-panel { display:none; background:var(--bg-secondary); border-radius:var(--radius-lg); border:1px solid var(--border-subtle); overflow:hidden; }
         .code-panel.active { display:block; }
+        .limitations-panel { display:none; background:var(--bg-secondary); border-radius:var(--radius-lg); border:1px solid var(--border-subtle); overflow:hidden; }
+        .limitations-panel.active { display:block; }
+        .limitations-inner { padding:18px 20px; }
+        .limitations-inner h3 { font-size:14px; margin-bottom:10px; color:var(--text-secondary); }
+        .limitations-list { margin-left:18px; color:var(--text-muted); font-size:12px; line-height:1.6; display:flex; flex-direction:column; gap:5px; }
         .code-toolbar { display:flex; justify-content:space-between; align-items:center; padding:10px 16px; border-bottom:1px solid var(--border-subtle); flex-wrap:wrap; gap:10px; }
         .code-filters { display:flex; gap:8px; flex-wrap:wrap; }
         .filter-checkbox { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--text-muted); cursor:pointer; font-weight:500; }
@@ -234,6 +239,8 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
         .query-checkbox { accent-color:var(--accent-teal); }
         .query-name { font-family:'Cascadia Code','Fira Code','Consolas',monospace; font-size:12.5px; font-weight:500; color:var(--accent-teal); }
         .query-deps { margin-left:auto; font-size:10.5px; color:var(--text-dim); font-family:'Cascadia Code','Fira Code','Consolas',monospace; }
+        .query-files { margin-left:8px; font-size:10.5px; color:var(--accent-gold); font-family:'Cascadia Code','Fira Code','Consolas',monospace; }
+        .query-files.only { margin-left:auto; }
         .query-code { padding:12px 16px 12px 28px; background:var(--bg-deep); font-family:'Cascadia Code','Fira Code','Consolas',monospace; font-size:11.5px; line-height:1.65; white-space:pre-wrap; word-break:break-all; color:var(--text-muted); max-height:220px; overflow-y:auto; border-top:1px solid var(--border-subtle); }
         .query-code .kw { color:var(--accent-violet); font-weight:500; }
         .query-code .str { color:var(--accent-gold); }
@@ -308,9 +315,8 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
             <p>Drag Excel files &mdash; or an entire folder</p>
             <div class="file-types">
                 <span class="file-type-badge">.xlsx</span>
-                <span class="file-type-badge">.xlsm</span>
             </div>
-            <label class="browse-btn">Browse Files<input type="file" id="fileInput" multiple accept=".xlsx,.xlsm"></label>
+            <label class="browse-btn">Browse Files<input type="file" id="fileInput" multiple accept=".xlsx"></label>
         </div>
 
         <div class="loading" id="loading"><div class="spinner-ring"></div><p>Extracting Power Query code&hellip;</p><div class="file-progress" id="fileProgress"></div></div>
@@ -331,6 +337,7 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
             <div class="tabs">
                 <button class="tab active" data-tab="graph">Dependency Graph</button>
                 <button class="tab" data-tab="code">Code (LLM Ready)</button>
+                <button class="tab" data-tab="limitations">Known Limitations</button>
             </div>
             <div class="graph-panel active" id="graphPanel">
                 <div class="graph-toolbar">
@@ -357,6 +364,22 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
                     </div>
                 </div>
                 <div class="code-content" id="codeContent"></div>
+            </div>
+            <div class="limitations-panel" id="limitationsPanel">
+                <div class="limitations-inner">
+                    <h3>Known Limitations</h3>
+                    <ul class="limitations-list">
+                        <li>Dependency detection is static text analysis and may miss dynamic/computed query references.</li>
+                        <li>The graph links query-to-query references only when both queries exist in uploaded files.</li>
+                        <li><code>File.Contents(...)</code> and <code>Folder.Contents(...)</code> are normalized to base names (for example, <code>Sales.xlsx</code>) from full paths.</li>
+                        <li>Only literal string paths in <code>File.Contents</code>/<code>Folder.Contents</code> are detected.</li>
+                        <li>If different folders contain the same base file name, cross-file hints can be ambiguous.</li>
+                        <li>Cross-file hints are informational only and are not executable links.</li>
+                        <li>The tool extracts M script text only; it does not execute M code or validate credentials/connections.</li>
+                        <li>Very unusual DataMashup/customXml variants may fail to parse.</li>
+                        <li>Only <code>.xlsx</code> workbooks are supported.</li>
+                    </ul>
+                </div>
             </div>
             <div class="prompt-section">
                 <h3><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/></svg> LLM Prompt Templates</h3>
@@ -526,11 +549,11 @@ function parseMCodeFile(mCode,fn){
             const eq=chunk.indexOf('=',chunk.indexOf(nm[1])+nm[1].length);
             const sb=sc.substring(eq+1),ls=sb.lastIndexOf(';');
             const qc=ls!==-1?chunk.substring(eq+1,(eq+1)+ls).trim():chunk.substring(eq+1).trim();
-            q.push({name,code:qc,fileName:fn,dependencies:findDeps(stripCS(qc),name)});
+            q.push({name,code:qc,fileName:fn,dependencies:findDeps(stripCS(qc),name),externalRefs:findExternalFileRefs(qc)});
         }
     }
     if(!q.length&&/\blet\b/i.test(stripped)&&/\bin\b/i.test(stripped))
-        q.push({name:'Query1',code:mCode.trim(),fileName:fn,dependencies:findDeps(stripped,'Query1')});
+        q.push({name:'Query1',code:mCode.trim(),fileName:fn,dependencies:findDeps(stripped,'Query1'),externalRefs:findExternalFileRefs(mCode)});
     return q;
 }
 
@@ -543,6 +566,21 @@ function findDeps(sc,self){
     const qp=/#"((?:[^"]*(?:""[^"]*)*)?)"/g;
     while((m=qp.exec(sc))!==null){const id=m[1].replace(/""/g,'"');if(id!==self)d.add(id);}
     return Array.from(d);
+}
+
+function findExternalFileRefs(code){
+    const refs=new Set();let m;
+    const re=/(?:File|Folder)\.Contents\s*\(\s*(#"(?:[^"]*(?:""[^"]*)*)"|"(?:[^"]|"")*")\s*\)/gi;
+    while((m=re.exec(code))!==null){
+        const lit=m[1];
+        let p='';
+        if(lit.startsWith('#"'))p=lit.slice(2,-1).replace(/""/g,'"');
+        else p=lit.slice(1,-1).replace(/""/g,'"');
+        const s=p.replace(/[?#].*$/,'').replace(/[\\\/]+$/,'').split(/[\\\/]/);
+        const base=s[s.length-1]||p;
+        if(base)refs.add(base);
+    }
+    return Array.from(refs);
 }
 
 // ═══ Syntax Highlighting ═══
@@ -567,6 +605,8 @@ function showBottomNotice(msg){
     const n=document.getElementById('bottomNotice');
     n.textContent=msg;
     n.classList.add('visible');
+    clearTimeout(n._t);
+    n._t=setTimeout(()=>n.classList.remove('visible'),4500);
 }
 function hideBottomNotice(){document.getElementById('bottomNotice').classList.remove('visible');}
 
@@ -619,7 +659,7 @@ function renderCodePanel(){
     content.innerHTML=appState.files.map((f,fi)=>{
         const qs=bf[f]||[],c=FILE_COLORS[fi%FILE_COLORS.length];
         return '<div class="file-section" data-file="'+escapeHtml(f)+'"><div class="file-header" onclick="toggleFS(this)"><svg class="file-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"/></svg><span class="file-name" style="color:'+c+'">'+escapeHtml(f)+'</span><span class="file-badge">'+qs.length+' quer'+(qs.length===1?'y':'ies')+'</span></div><div class="file-queries">'+qs.map(q=>
-            '<div class="query-block"><div class="query-header"><input type="checkbox" class="query-checkbox" checked data-query="'+escapeHtml(q.name)+'" data-file="'+escapeHtml(q.fileName)+'"><span class="query-name">'+escapeHtml(q.name)+'</span>'+(q.dependencies.length?'<span class="query-deps">\u2192 '+q.dependencies.map(d=>escapeHtml(d)).join(', ')+'</span>':'')+'</div><pre class="query-code">'+hlM(q.code)+'</pre></div>'
+            '<div class="query-block"><div class="query-header"><input type="checkbox" class="query-checkbox" checked data-query="'+escapeHtml(q.name)+'" data-file="'+escapeHtml(q.fileName)+'"><span class="query-name">'+escapeHtml(q.name)+'</span>'+(q.dependencies.length?'<span class="query-deps">\u2192 '+q.dependencies.map(d=>escapeHtml(d)).join(', ')+'</span>':'')+((q.externalRefs&&q.externalRefs.length)?'<span class="query-files'+(q.dependencies.length?'':' only')+'">\u2197 '+q.externalRefs.map(d=>escapeHtml(d)).join(', ')+'</span>':'')+'</div><pre class="query-code">'+hlM(q.code)+'</pre></div>'
         ).join('')+'</div></div>';
     }).join('');
     filters.querySelectorAll('input[type="checkbox"]').forEach(cb=>{
@@ -640,7 +680,7 @@ function getSelCode(prompt){
     const sel=document.querySelectorAll('.query-checkbox:checked'),bf={};
     sel.forEach(cb=>{const f=cb.dataset.file,n=cb.dataset.query,q=appState.queries.find(x=>x.name===n&&x.fileName===f);if(q){if(!bf[f])bf[f]=[];bf[f].push(q);}});
     let o=prompt||'';
-    for(const[f,qs]of Object.entries(bf)){o+='// ========== '+f+' ==========\n\n';for(const q of qs){o+='// --- Query: '+q.name+' ---\n';if(q.dependencies.length)o+='// Dependencies: '+q.dependencies.join(', ')+'\n';o+=q.code+'\n\n';}}
+    for(const[f,qs]of Object.entries(bf)){o+='// ========== '+f+' ==========\n\n';for(const q of qs){o+='// --- Query: '+q.name+' ---\n';if(q.dependencies.length)o+='// Dependencies: '+q.dependencies.join(', ')+'\n';if(q.externalRefs&&q.externalRefs.length)o+='// External file refs: '+q.externalRefs.join(', ')+'\n';o+=q.code+'\n\n';}}
     return o.trim();
 }
 
@@ -709,7 +749,7 @@ async function readDir(de,files){
     await new Promise(res=>{(function rb(){rd.readEntries(ents=>{if(!ents.length)return res();all.push(...ents);rb();});})();});
     for(const e of all){
         if(e.isDirectory)await readDir(e,files);
-        else if(e.name.match(/\.(xlsx|xlsm)$/i))files.push(await new Promise(r=>e.file(r)));
+        else if(e.name.match(/\.xlsx$/i))files.push(await new Promise(r=>e.file(r)));
     }
 }
 
@@ -717,7 +757,7 @@ async function readHandle(h,files){
     if(!h)return;
     if(h.kind==='file'){
         const f=await h.getFile();
-        if(f&&f.name.match(/\.(xlsx|xlsm)$/i))files.push(f);
+        if(f&&f.name.match(/\.xlsx$/i))files.push(f);
         return;
     }
     if(h.kind==='directory'){
@@ -750,18 +790,18 @@ dz.addEventListener('drop',async e=>{
             }catch(err){}
         }
         const en=it.webkitGetAsEntry?.();
-        if(en){if(en.isDirectory)await readDir(en,files);else if(en.name.match(/\.(xlsx|xlsm)$/i)){const f=it.getAsFile();if(f)files.push(f);}continue;}
+        if(en){if(en.isDirectory)await readDir(en,files);else if(en.name.match(/\.xlsx$/i)){const f=it.getAsFile();if(f)files.push(f);}continue;}
         const f=it.getAsFile();
-        if(f&&f.name.match(/\.(xlsx|xlsm)$/i))files.push(f);
+        if(f&&f.name.match(/\.xlsx$/i))files.push(f);
     }
     if(!files.length&&dt?.files){
-        for(const f of Array.from(dt.files))if(f.name.match(/\.(xlsx|xlsm)$/i))files.push(f);
+        for(const f of Array.from(dt.files))if(f.name.match(/\.xlsx$/i))files.push(f);
     }
     const finalFiles=uniqFiles(files);
-    if(finalFiles.length)await processFiles(finalFiles);else showToast('No .xlsx or .xlsm files found','warning');
+    if(finalFiles.length)await processFiles(finalFiles);else showToast('No .xlsx files found','warning');
 });
 dz.addEventListener('click',e=>{if(e.target.closest('.browse-btn')||e.target===fi)return;fi.click();});
-fi.addEventListener('change',async e=>{const f=Array.from(e.target.files).filter(f=>f.name.match(/\.(xlsx|xlsm)$/i));if(f.length)await processFiles(f);});
+fi.addEventListener('change',async e=>{const f=Array.from(e.target.files).filter(f=>f.name.match(/\.xlsx$/i));if(f.length)await processFiles(f);});
 
 document.getElementById('resetBtn').addEventListener('click',resetApp);
 
@@ -770,6 +810,7 @@ document.querySelectorAll('.tab').forEach(tab=>{tab.addEventListener('click',()=
     const t=tab.dataset.tab;
     document.getElementById('graphPanel').classList.toggle('active',t==='graph');
     document.getElementById('codePanel').classList.toggle('active',t==='code');
+    document.getElementById('limitationsPanel').classList.toggle('active',t==='limitations');
 });});
 
 document.getElementById('copyBtn').addEventListener('click',()=>copyClip(getSelCode()));
