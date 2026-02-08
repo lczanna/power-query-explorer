@@ -324,7 +324,30 @@ function readMCodeFromSQLite(dbBuf) {
     }
 
     // 3. Read Partition.QueryDefinition (M code for tables)
+    // Partition names can include internal IDs (e.g. Table-<guid>), so we normalize
+    // to one entry per table using the user-facing table name.
     const queries = [];
+    const partitionByTable = new Map();
+    const guidSuffixRe = /-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const systemTableNameRe = /^(?:LocalDateTable_|DateTableTemplate_)/i;
+
+    function partitionScore(partName, tableName, queryDef) {
+        let score = 0;
+        if (typeof partName === 'string' && partName.trim()) {
+            const cleanPartName = partName.replace(guidSuffixRe, '');
+            if (cleanPartName === tableName) score += 4;
+            if (!guidSuffixRe.test(partName)) score += 1;
+        } else {
+            score += 1;
+        }
+        if (typeof queryDef === 'string') score += Math.min(queryDef.length, 10000) / 10000;
+        return score;
+    }
+
+    function isSystemModelTableName(name) {
+        return typeof name === 'string' && systemTableNameRe.test(name);
+    }
+
     if (tableInfo['Partition']) {
         const partRows = readTable(tableInfo['Partition']);
         for (const row of partRows) {
@@ -333,14 +356,27 @@ function readMCodeFromSQLite(dbBuf) {
             const partName = row.values[2];
             const queryDef = row.values[5];
             if (typeof queryDef === 'string' && queryDef.trim().length > 0) {
-                const tableName = tableNames[tableId] || ('Table_' + tableId);
-                queries.push({
-                    name: partName || tableName,
+                const partBaseName = (typeof partName === 'string' && partName.trim())
+                    ? partName.replace(guidSuffixRe, '')
+                    : '';
+                const tableName = tableNames[tableId] || partBaseName || ('Table_' + tableId);
+                if (isSystemModelTableName(tableName)) continue;
+                const candidate = {
+                    name: tableName,
                     tableName: tableName,
-                    mCode: queryDef
-                });
+                    mCode: queryDef,
+                    _score: partitionScore(partName, tableName, queryDef)
+                };
+                const existing = partitionByTable.get(tableName);
+                if (!existing || candidate._score > existing._score) {
+                    partitionByTable.set(tableName, candidate);
+                }
             }
         }
+    }
+
+    for (const q of partitionByTable.values()) {
+        queries.push({ name: q.name, tableName: q.tableName, mCode: q.mCode });
     }
 
     // 4. Read Expression table (shared M expressions / parameters)
@@ -351,6 +387,7 @@ function readMCodeFromSQLite(dbBuf) {
             const name = row.values[2];
             const expr = row.values[5];
             if (typeof expr === 'string' && expr.trim().length > 0) {
+                if (isSystemModelTableName(name)) continue;
                 queries.push({
                     name: name || 'Expression',
                     tableName: null,
@@ -376,11 +413,23 @@ window.extractFromDataModel = async function(dataModelArrayBuffer, fileName) {
     const mEntries = readMCodeFromSQLite(sqliteData);
 
     // Return in the format expected by the app
-    return mEntries.map(e => ({
-        name: e.name,
-        code: e.mCode,
-        fileName: fileName
-    }));
+    return mEntries.map(e => {
+        const name = (typeof e.name === 'string' && e.name.trim()) ? e.name : 'Query';
+        const code = typeof e.mCode === 'string' ? e.mCode : '';
+        const dependencies = (typeof stripCS === 'function' && typeof findDeps === 'function')
+            ? findDeps(stripCS(code), name)
+            : [];
+        const externalRefs = typeof findExternalFileRefs === 'function'
+            ? findExternalFileRefs(code)
+            : [];
+        return {
+            name,
+            code,
+            fileName: fileName,
+            dependencies,
+            externalRefs
+        };
+    });
 };
 
 })();
