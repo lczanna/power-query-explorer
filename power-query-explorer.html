@@ -1194,7 +1194,7 @@ function renderFileList(){
     list.innerHTML='<button class="file-select-all" id="fileSelectAll">Select All Files</button><span class="file-list-hint">Ctrl/Cmd+click to select multiple files</span>'+
         appState.files.map((f,i)=>{
             const isActive=active.has(f);
-            return '<div class="file-chip '+(isActive?'active':'inactive')+'" data-file="'+escapeHtml(f)+'"><span class="dot" style="background:'+FILE_COLORS[i%FILE_COLORS.length]+'"></span>'+escapeHtml(f)+'<span class="qc">'+(bf[f]||0)+'</span></div>';
+            return '<div class="file-chip legend-item '+(isActive?'active':'inactive')+'" data-file="'+escapeHtml(f)+'"><span class="dot" style="background:'+FILE_COLORS[i%FILE_COLORS.length]+'"></span>'+escapeHtml(f)+'<span class="qc">'+(bf[f]||0)+'</span></div>';
         }).join('');
     const selAll=document.getElementById('fileSelectAll');
     if(selAll)selAll.addEventListener('click',()=>{
@@ -1228,7 +1228,10 @@ function renderGraph(){
     const nids=new Set(nodes.map(n=>n.data.id)),edges=[];
     for(const q of activeQueries)for(const dep of q.dependencies){
         const dq=byName.get(dep);
-        if(dq){const s=q.fileName+'::'+q.name,t=dq.fileName+'::'+dq.name;if(nids.has(s)&&nids.has(t)&&s!==t)edges.push({data:{source:s,target:t}});}
+        if(dq){
+            const depId=dq.fileName+'::'+dq.name,queryId=q.fileName+'::'+q.name;
+            if(nids.has(depId)&&nids.has(queryId)&&depId!==queryId)edges.push({data:{source:depId,target:queryId}});
+        }
     }
     appState.cyInstance=cytoscape({container:ct,elements:[...nodes,...edges],
         style:[

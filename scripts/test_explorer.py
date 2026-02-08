@@ -187,6 +187,25 @@ def test_multi_query(page):
     legend = page.locator(".legend-item")
     result("Graph legend has entries", legend.count() > 0)
 
+    # Dependency edge direction: dependency -> dependent
+    raw_to_joined = page.evaluate("""() => {
+        if (!appState.cyInstance) return false;
+        return appState.cyInstance.edges().jsons().some(e =>
+            e?.data?.source?.endsWith("::RawOrders") &&
+            e?.data?.target?.endsWith("::OrdersWithCustomers")
+        );
+    }""")
+    result("Graph edges point dependency -> dependent (RawOrders -> OrdersWithCustomers)", raw_to_joined)
+
+    joined_to_summary = page.evaluate("""() => {
+        if (!appState.cyInstance) return false;
+        return appState.cyInstance.edges().jsons().some(e =>
+            e?.data?.source?.endsWith("::OrdersWithCustomers") &&
+            e?.data?.target?.endsWith("::SalesSummary")
+        );
+    }""")
+    result("Graph edges point dependency -> dependent (OrdersWithCustomers -> SalesSummary)", joined_to_summary)
+
 
 def test_complex_code(page):
     """Test complex M code with comments, strings, nested lets."""
