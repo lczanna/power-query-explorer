@@ -1122,9 +1122,26 @@ function parseMCodeFile(mCode,fn){
 const MKW=new Set(['let','in','if','then','else','true','false','null','and','or','not','each','error','try','otherwise','type','is','as','meta','section','shared','Table','List','Record','Text','Number','Date','DateTime','DateTimeZone','Duration','Time','Function','Binary','Csv','Json','Xml','Excel','Sql','OData','Web','File','Folder','Lines','Splitter','Comparer','Combiner','Replacer','Expression','Error','Value','Type','Action','Uri','Byte','Currency','Percentage','Int8','Int16','Int32','Int64','Single','Double','Decimal','Logical','Access','ActiveDirectory','AdobeAnalytics','AdoDotNet','AnalysisServices','AzureStorage','DB2','Cube','Diagnostics','Exchange','Facebook','GoogleAnalytics','Hdfs','Informix','MySQL','Odbc','OleDb','Oracle','PDF','PostgreSQL','Salesforce','SapBusinessWarehouse','SapHana','SharePoint','Sybase','Teradata','Power','Any','Source','Navigation','Data','Schema','Item']);
 
 function findDeps(sc,self){
+    // Ignore plain-word token extraction inside #"..."
+    // to avoid false splits like #"FactOnlineSales Agg" -> FactOnlineSales + Agg.
+    let scan='';{
+        let i=0;
+        while(i<sc.length){
+            if(sc[i]==='#'&&sc[i+1]==='"'){
+                scan+='#"';i+=2;
+                while(i<sc.length){
+                    if(sc[i]==='"'&&sc[i+1]==='"'){scan+='  ';i+=2;}
+                    else if(sc[i]==='"'){scan+='"';i++;break;}
+                    else{scan+=sc[i]==='\n'?'\n':' ';i++;}
+                }
+                continue;
+            }
+            scan+=sc[i];i++;
+        }
+    }
     const d=new Set();let m;
     const ip=/\b([A-Za-z_][\w]*)\b/g;
-    while((m=ip.exec(sc))!==null){const id=m[1];if(id!==self&&!MKW.has(id)&&!/^\d/.test(id)&&sc[m.index+id.length]!=='.')d.add(id);}
+    while((m=ip.exec(scan))!==null){const id=m[1];if(id!==self&&!MKW.has(id)&&!/^\d/.test(id)&&scan[m.index+id.length]!=='.')d.add(id);}
     const qp=/#"((?:[^"]*(?:""[^"]*)*)?)"/g;
     while((m=qp.exec(sc))!==null){const id=m[1].replace(/""/g,'"');if(id!==self)d.add(id);}
     return Array.from(d);

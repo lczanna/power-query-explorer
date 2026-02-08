@@ -101,6 +101,14 @@ def test_page_load(page):
     logo = page.locator(".logo-icon")
     result("Logo shows 'PQ'", logo.inner_text().strip() == "PQ")
 
+    # Dependency parser: quoted identifiers should stay whole and not split.
+    quoted_deps = page.evaluate("""() => {
+        const code = 'let Source = #"FactOnlineSales Agg" in Source';
+        return findDeps(stripCS(code), 'TestQuery');
+    }""")
+    result("Quoted dependency kept as full identifier", "FactOnlineSales Agg" in quoted_deps, str(quoted_deps))
+    result("Quoted dependency not split into partial token", "FactOnlineSales" not in quoted_deps, str(quoted_deps))
+
 
 def test_simple_query(page):
     """Test single query file parsing."""
