@@ -1,0 +1,3 @@
+# Compiled outputs (embedded in power-query-explorer.html via scripts/embed_wasm.py)
+xpress9.js
+xpress9.wasm
