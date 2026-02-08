@@ -345,6 +345,65 @@ def m_edge_cases() -> str:
     )
 
 
+def create_pbix_file(path: str, m_code: str) -> None:
+    """Create a minimal .pbix/.pbit file with a DataMashup containing the given M code.
+
+    A .pbix file is a ZIP (OPC) archive. The Power Query M code lives inside a
+    DataMashup binary (MS-QDEFF format) at the root of the archive. We build
+    a minimal archive with just enough structure for the explorer to parse.
+    """
+    # Build inner OPC ZIP (the Package inside DataMashup)
+    inner_buf = io.BytesIO()
+    with zipfile.ZipFile(inner_buf, "w", zipfile.ZIP_DEFLATED) as zin:
+        zin.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Default Extension="m" ContentType="application/x-ms-m"/>'
+            "</Types>",
+        )
+        zin.writestr(
+            "Config/Package.xml",
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<Package xmlns="http://schemas.microsoft.com/DataMashup">'
+            "<Version>2.72.0</Version>"
+            "<MinVersion>2.21.0</MinVersion>"
+            "<Culture>en-US</Culture>"
+            "</Package>",
+        )
+        zin.writestr("Formulas/Section1.m", m_code)
+    inner_bytes = inner_buf.getvalue()
+
+    # Build MS-QDEFF binary stream: version(4) + pkgLen(4) + ZIP(pkgLen)
+    version = 0
+    datamashup_blob = struct.pack("<II", version, len(inner_bytes)) + inner_bytes
+
+    # Build the outer .pbix ZIP archive
+    out_buf = io.BytesIO()
+    with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        zout.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="json" ContentType="application/json"/>'
+            '<Override PartName="/DataMashup" ContentType="application/vnd.ms-DataMashup"/>'
+            "</Types>",
+        )
+        zout.writestr("DataMashup", datamashup_blob)
+        zout.writestr("Version", "1.0")
+        zout.writestr("DataModelSchema", "{}")
+        zout.writestr(
+            "Report/Layout",
+            '{"id":0,"reportId":"00000000-0000-0000-0000-000000000000","pods":[]}',
+        )
+        zout.writestr("Settings", '{"version":"1.0"}')
+        zout.writestr("Metadata", '{"version":"1.0","type":"report"}')
+
+    with open(path, "wb") as f:
+        f.write(out_buf.getvalue())
+
+
 # ============================================================
 # File Creators
 # ============================================================
@@ -394,6 +453,24 @@ def create_edge_cases():
     print(f"  Created: {path}")
 
 
+def create_simple_pbix():
+    path = os.path.join(OUTPUT_DIR, "simple_query.pbix")
+    create_pbix_file(path, m_simple_query())
+    print(f"  Created: {path}")
+
+
+def create_multi_pbix():
+    path = os.path.join(OUTPUT_DIR, "multi_query.pbix")
+    create_pbix_file(path, m_multi_query())
+    print(f"  Created: {path}")
+
+
+def create_simple_pbit():
+    path = os.path.join(OUTPUT_DIR, "simple_query.pbit")
+    create_pbix_file(path, m_simple_query())
+    print(f"  Created: {path}")
+
+
 # ============================================================
 # Main
 # ============================================================
@@ -408,6 +485,9 @@ def main():
     create_stress_test()
     create_no_queries()
     create_edge_cases()
+    create_simple_pbix()
+    create_multi_pbix()
+    create_simple_pbit()
     print(f"\nAll test files created in: {OUTPUT_DIR}")
 
 

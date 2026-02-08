@@ -1,12 +1,12 @@
 ## Power Query Explorer
 
-Power Query Explorer is a single-file web app that extracts and visualizes Power Query M code from Excel workbooks (`.xlsx`) directly in the browser.
+Power Query Explorer is a single-file web app that extracts and visualizes Power Query M code from Excel workbooks (`.xlsx`) and Power BI files (`.pbix`, `.pbit`) directly in the browser.
 
 Live site: https://lczanna.github.io/power-query-explorer/
 
 ### What it does
 
-- Extracts M queries from uploaded `.xlsx` files.
+- Extracts M queries from uploaded `.xlsx`, `.pbix`, and `.pbit` files.
 - Builds a dependency graph between queries.
 - Shows per-query code with syntax highlighting.
 - Supports multi-file uploads and query selection for copy-to-clipboard workflows.
@@ -15,7 +15,7 @@ Live site: https://lczanna.github.io/power-query-explorer/
 ### Quick start
 
 1. Open the live site above, or open `index.html` locally.
-2. Drop one or more `.xlsx` files.
+2. Drop one or more `.xlsx`, `.pbix`, or `.pbit` files.
 3. Explore:
    - `Dependency Graph` tab for relationships.
    - `Code` tab for query text and copy/export workflows.
@@ -46,7 +46,7 @@ See `scripts/README.md` for commands.
 
 - `power-query-explorer.html`: Main self-contained app.
 - `index.html`: GitHub Pages entrypoint (redirects to `power-query-explorer.html`).
-- `data/test-files/`: Sample Excel files used for validation and demos.
+- `data/test-files/`: Sample Excel and Power BI files used for validation and demos.
 - `scripts/`: Test-data generation and automated browser tests.
 - `pyproject.toml` + `uv.lock`: Python environment metadata for project scripts.
 
