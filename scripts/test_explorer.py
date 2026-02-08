@@ -743,6 +743,28 @@ def test_pbit_simple(page):
     result("File chip shows '.pbit'", ".pbit" in chip_text, chip_text)
 
 
+def test_pbit_schema_only(page):
+    """Test parsing a .pbit file that only has DataModelSchema (no DataMashup)."""
+    print("\n━━━ PBIT Schema-Only (DataModelSchema fallback) ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["schema_only.pbit"])
+
+    result("Main content visible", page.locator("#mainContent").is_visible())
+
+    queries_stat = page.locator("#statQueries").inner_text()
+    result("Queries count = 3", queries_stat == "3", f"Got: {queries_stat}")
+
+    page.locator('.tab[data-tab="code"]').click()
+    page.wait_for_timeout(200)
+    actual_names = {el.inner_text() for el in page.locator(".query-name").all()}
+    expected_names = {"SalesData", "Customers", "StartDate"}
+    result("Expected query names present", actual_names == expected_names, f"Got: {actual_names}")
+
+    result("No error log visible", not page.locator("#errorLog").is_visible())
+
+
 def test_mixed_xlsx_pbix(page):
     """Test uploading .xlsx and .pbix files together."""
     print("\n━━━ Mixed .xlsx + .pbix Upload ━━━")
@@ -864,6 +886,7 @@ def _run_tests():
             test_pbix_simple,
             test_pbix_multi_query,
             test_pbit_simple,
+            test_pbit_schema_only,
             test_mixed_xlsx_pbix,
         ]
 

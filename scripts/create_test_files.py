@@ -471,6 +471,82 @@ def create_simple_pbit():
     print(f"  Created: {path}")
 
 
+def create_schema_only_pbit():
+    """Create a .pbit file with DataModelSchema JSON (no DataMashup).
+
+    Tests the fallback extraction path used when DataMashup is absent.
+    """
+    import json
+
+    schema = {
+        "name": "test-model",
+        "compatibilityLevel": 1550,
+        "model": {
+            "culture": "en-US",
+            "tables": [
+                {
+                    "name": "SalesData",
+                    "partitions": [
+                        {
+                            "name": "SalesData-partition",
+                            "source": {
+                                "type": "m",
+                                "expression": [
+                                    "let",
+                                    '    Source = #table({"ID", "Amount"}, {{1, 100}, {2, 200}}),',
+                                    '    Typed = Table.TransformColumnTypes(Source, {{"ID", Int64.Type}, {"Amount", type number}})',
+                                    "in",
+                                    "    Typed",
+                                ],
+                            },
+                        }
+                    ],
+                },
+                {
+                    "name": "Customers",
+                    "partitions": [
+                        {
+                            "name": "Customers-partition",
+                            "source": {
+                                "type": "m",
+                                "expression": 'let\n    Source = #table({"CustID", "Name"}, {{1, "Alice"}, {2, "Bob"}})\nin\n    Source',
+                            },
+                        }
+                    ],
+                },
+            ],
+            "expressions": [
+                {
+                    "name": "StartDate",
+                    "expression": '#date(2024, 1, 1) meta [IsParameterQuery=true, Type="Date"]',
+                },
+            ],
+        },
+    }
+    schema_json = json.dumps(schema, ensure_ascii=False)
+    schema_bytes = schema_json.encode("utf-16-le")
+
+    path = os.path.join(OUTPUT_DIR, "schema_only.pbit")
+    out_buf = io.BytesIO()
+    with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        zout.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="json" ContentType="application/json"/>'
+            '<Override PartName="/DataModelSchema" ContentType="application/json"/>'
+            "</Types>",
+        )
+        zout.writestr("DataModelSchema", schema_bytes)
+        zout.writestr("Version", "1.0")
+        zout.writestr("Settings", '{"version":"1.0"}')
+        zout.writestr("Metadata", '{"version":"1.0","type":"template"}')
+
+    with open(path, "wb") as f:
+        f.write(out_buf.getvalue())
+    print(f"  Created: {path}")
+
+
 # ============================================================
 # Main
 # ============================================================
@@ -488,6 +564,7 @@ def main():
     create_simple_pbix()
     create_multi_pbix()
     create_simple_pbit()
+    create_schema_only_pbit()
     print(f"\nAll test files created in: {OUTPUT_DIR}")
 
 
