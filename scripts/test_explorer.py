@@ -420,6 +420,79 @@ def test_drag_drop_partial_items_uses_files_list(page):
     result("Drag/drop uses DataTransfer.files to include all dropped files", files_stat == "2", f"Got: {files_stat}")
 
 
+def test_drag_drop_multiple_file_handles_same_tick(page):
+    """Test drag/drop where all file handles must be captured in the same event tick."""
+    print("\n━━━ Drag Drop (same-tick handle capture) ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+
+    f1 = TEST_DIR / "simple_query.xlsx"
+    f2 = TEST_DIR / "multi_query.xlsx"
+    payload = {
+        "f1_name": f1.name,
+        "f1_b64": base64.b64encode(f1.read_bytes()).decode("ascii"),
+        "f2_name": f2.name,
+        "f2_b64": base64.b64encode(f2.read_bytes()).decode("ascii"),
+    }
+
+    page.evaluate("""(payload) => {
+        const b64ToU8 = (s) => {
+            const bin = atob(s);
+            const out = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+            return out;
+        };
+
+        const f1 = new File([b64ToU8(payload.f1_b64)], payload.f1_name, {
+            type: "application/octet-stream",
+            lastModified: Date.now()
+        });
+        const f2 = new File([b64ToU8(payload.f2_b64)], payload.f2_name, {
+            type: "application/octet-stream",
+            lastModified: Date.now() + 1
+        });
+
+        // Simulate environments where getAsFileSystemHandle must be called
+        // for all items in the same event turn.
+        let sameTick = true;
+        queueMicrotask(() => { sameTick = false; });
+
+        const mkHandle = (file) => ({
+            kind: "file",
+            getFile: async () => file
+        });
+
+        const mkItem = (file) => ({
+            kind: "file",
+            getAsFileSystemHandle: () => {
+                if (!sameTick) return Promise.reject(new Error("Handle access expired"));
+                return Promise.resolve(mkHandle(file));
+            },
+            getAsFile: () => null,
+            webkitGetAsEntry: () => null
+        });
+
+        const mockDt = {
+            items: [mkItem(f1), mkItem(f2)],
+            files: []
+        };
+
+        const ev = new Event("drop", { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "dataTransfer", { value: mockDt });
+        document.getElementById("dropZone").dispatchEvent(ev);
+    }""", payload)
+
+    page.wait_for_function(
+        "() => !document.getElementById('loading').classList.contains('active')",
+        timeout=15000
+    )
+    page.wait_for_timeout(200)
+
+    files_stat = page.locator("#statFiles").inner_text()
+    result("Drag/drop captures all file handles in same event tick", files_stat == "2", f"Got: {files_stat}")
+
+
 def test_select_all_and_copy(page):
     """Test Select All toggle and Copy button."""
     print("\n━━━ Select All & Copy ━━━")
@@ -959,6 +1032,7 @@ def _run_tests():
             test_no_queries,
             test_multi_file_upload,
             test_drag_drop_partial_items_uses_files_list,
+            test_drag_drop_multiple_file_handles_same_tick,
             test_mixed_valid_invalid,
             test_select_all_and_copy,
             test_file_filter,

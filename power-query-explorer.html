@@ -1404,23 +1404,35 @@ dz.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();dz.cla
 dz.addEventListener('dragleave',e=>{e.preventDefault();e.stopPropagation();dz.classList.remove('drag-over');});
 dz.addEventListener('drop',async e=>{
     e.preventDefault();e.stopPropagation();dz.classList.remove('drag-over');
-    const dt=e.dataTransfer,items=dt?.items,files=[];
+    const dt=e.dataTransfer,items=dt?.items,files=[],pending=[];
     if(items)for(const it of items){
         if(it.kind!=='file')continue;
+        let usedHandleApi=false;
         if(typeof it.getAsFileSystemHandle==='function'){
             try{
-                const h=await it.getAsFileSystemHandle();
-                if(h){await readHandle(h,files);continue;}
+                // Collect handle promises in the same drop-event tick.
+                // Some platforms only allow grabbing all handles synchronously.
+                const hp=it.getAsFileSystemHandle();
+                if(hp!=null){
+                    usedHandleApi=true;
+                    pending.push(Promise.resolve(hp).then(async h=>{if(h)await readHandle(h,files);}).catch(()=>{}));
+                }
             }catch(err){}
         }
+        if(usedHandleApi)continue;
         const en=it.webkitGetAsEntry?.();
-        if(en){if(en.isDirectory)await readDir(en,files);else if(isSupportedFile(en.name)){const f=it.getAsFile();if(f)files.push(f);}continue;}
+        if(en){
+            if(en.isDirectory)pending.push(readDir(en,files).catch(()=>{}));
+            else if(isSupportedFile(en.name)){const f=it.getAsFile();if(f)files.push(f);}
+            continue;
+        }
         const f=it.getAsFile();
         if(f&&isSupportedFile(f.name))files.push(f);
     }
     if(dt?.files){
         for(const f of Array.from(dt.files))if(isSupportedFile(f.name))files.push(f);
     }
+    if(pending.length)await Promise.all(pending);
     const finalFiles=uniqFiles(files);
     if(finalFiles.length)await processFiles(finalFiles);else showToast('No supported files found (.xlsx, .pbix, .pbit)','warning');
 });
