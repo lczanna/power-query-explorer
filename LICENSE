@@ -1,0 +1,27 @@
+Power Query Explorer - Third-Party License Notices
+
+Copyright (c) 2026 Luca Zanna
+
+This repository bundles or uses the following open-source software:
+
+1. JSZip (v3.10.1)
+   License: MIT License (JSZip is dual-licensed MIT or GPLv3)
+   Project: https://github.com/Stuk/jszip
+   License text: https://github.com/Stuk/jszip/blob/main/LICENSE.markdown
+
+2. pako (used by JSZip)
+   License: MIT License
+   Project: https://github.com/nodeca/pako
+   License text: https://github.com/nodeca/pako/blob/master/LICENSE
+
+3. Cytoscape.js (v3.28.1)
+   License: MIT License
+   Project: https://github.com/cytoscape/cytoscape.js
+   License text: https://github.com/cytoscape/cytoscape.js/blob/master/LICENSE
+
+4. XPress9 decompressor sources and WASM wrapper (`wasm/xpress9/*`)
+   License: MIT License
+   Local license file: `wasm/xpress9/LICENSE-xpress9`
+
+Unless otherwise noted, each third-party component remains under its
+respective original license terms.
