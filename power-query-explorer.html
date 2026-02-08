@@ -354,11 +354,13 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             </div>
             <h2>Drop your files here</h2>
-            <p>Drag Excel files or an entire folder</p>
+            <p>Drag Excel or Power BI files, or an entire folder</p>
             <div class="file-types">
                 <span class="file-type-badge">.xlsx</span>
+                <span class="file-type-badge">.pbix</span>
+                <span class="file-type-badge">.pbit</span>
             </div>
-            <label class="browse-btn">Browse Files<input type="file" id="fileInput" multiple accept=".xlsx"></label>
+            <label class="browse-btn">Browse Files<input type="file" id="fileInput" multiple accept=".xlsx,.pbix,.pbit"></label>
         </div>
 
         <div class="loading" id="loading"><div class="spinner-ring"></div><p>Extracting Power Query code&hellip;</p><div class="file-progress" id="fileProgress"></div></div>
@@ -431,7 +433,8 @@ var ts=function(){function e(e){return-e.tension*e.x-e.friction*e.v}function t(t
                         <li>Cross-file hints are informational only and are not executable links.</li>
                         <li>The tool extracts M script text only; it does not execute M code or validate credentials/connections.</li>
                         <li>Very unusual DataMashup/customXml variants may fail to parse.</li>
-                        <li>Only <code>.xlsx</code> workbooks are supported.</li>
+                        <li><code>.xlsx</code>, <code>.pbix</code>, and <code>.pbit</code> files are supported. Other formats (e.g. <code>.xls</code>, <code>.xlsm</code>) are not.</li>
+                        <li>Some newer <code>.pbix</code> files embed queries inside a compressed DataModel that cannot be read in the browser. If you see this error, export as <code>.pbit</code> (File &rarr; Export &rarr; Power BI template) for full extraction.</li>
                     </ul>
                 </div>
             </div>
@@ -494,6 +497,69 @@ async function parseXlsxFile(file){
     }
     return{queries,errors};
 }
+
+async function parsePbixFile(file){
+    const zip=await JSZip.loadAsync(file);
+    const queries=[],seen=new Set(),errors=[];
+    function addUnique(nq){for(const q of nq){const k=q.fileName+'::'+q.name;if(!seen.has(k)){seen.add(k);queries.push(q);}}}
+    // Path 1: DataMashup as a top-level file (MS-QDEFF binary) — works for .pbit and older .pbix
+    const dmEntry=zip.files['DataMashup']||zip.files['datamashup'];
+    if(dmEntry){
+        try{addUnique(await extractFromDataMashup(await dmEntry.async('arraybuffer'),file.name));}
+        catch(e){errors.push('DataMashup: '+e.message);}
+    }
+    // Path 2: DataModelSchema JSON — works for .pbit and enhanced metadata .pbix
+    if(!queries.length){
+        const schemaEntry=zip.files['DataModelSchema'];
+        if(schemaEntry){
+            try{addUnique(extractFromDataModelSchema(await schemaEntry.async('arraybuffer'),file.name));}
+            catch(e){errors.push('DataModelSchema: '+e.message);}
+        }
+    }
+    // Path 3: If only DataModel (compressed ABF) exists, inform user
+    if(!queries.length&&!dmEntry&&!zip.files['DataModelSchema']&&zip.files['DataModel']){
+        errors.push('This file uses a compressed DataModel (V3 format). Power Query code is embedded in the compressed model and cannot be extracted in the browser. Try saving as .pbit (File \u2192 Export \u2192 Power BI template) for full query extraction.');
+    }
+    return{queries,errors};
+}
+
+function extractFromDataModelSchema(buf,fn){
+    const q=[];
+    // DataModelSchema is UTF-16LE JSON
+    let raw=new Uint8Array(buf instanceof ArrayBuffer?buf:buf.buffer||buf);
+    let text='';
+    try{text=new TextDecoder('utf-16le').decode(raw).replace(/^\uFEFF/,'');}
+    catch(e){text=new TextDecoder('utf-8').decode(raw).replace(/^\uFEFF/,'');}
+    const model=JSON.parse(text);
+    const tables=(model.model||model).tables||[];
+    const seen=new Set();
+    // Extract from table partitions (source type 'm')
+    for(const t of tables){
+        for(const p of(t.partitions||[])){
+            const src=p.source||{};
+            if(src.type!=='m')continue;
+            let expr=src.expression;
+            if(Array.isArray(expr))expr=expr.join('\n');
+            if(!expr)continue;
+            const name=t.name;
+            if(seen.has(name))continue;seen.add(name);
+            q.push({name,code:expr.trim(),fileName:fn,dependencies:findDeps(stripCS(expr),name),externalRefs:findExternalFileRefs(expr)});
+        }
+    }
+    // Extract from top-level expressions (parameters, functions, standalone queries)
+    for(const e of((model.model||model).expressions||[])){
+        let expr=e.expression;
+        if(Array.isArray(expr))expr=expr.join('\n');
+        if(!expr)continue;
+        const name=e.name;
+        if(seen.has(name))continue;seen.add(name);
+        q.push({name,code:expr.trim(),fileName:fn,dependencies:findDeps(stripCS(expr),name),externalRefs:findExternalFileRefs(expr)});
+    }
+    return q;
+}
+
+function isPbixFile(name){return/\.pbi[xt]$/i.test(name);}
+function isSupportedFile(name){return/\.(xlsx|pbi[xt])$/i.test(name);}
 
 async function extractFromDataMashup(buf,fn){
     const q=[],b=new Uint8Array(buf);
@@ -791,7 +857,7 @@ async function processFiles(files){
         const f=files[i];prog.textContent=(i+1)+' / '+files.length+': '+f.name;
         if(f.size>MAX_FILE_SIZE){appState.errors.push({file:f.name,msg:'Too large (>'+Math.round(MAX_FILE_SIZE/1024/1024)+'MB)'});continue;}
         try{
-            const r=await parseXlsxFile(f);
+            const r=isPbixFile(f.name)?await parsePbixFile(f):await parseXlsxFile(f);
             if(r.errors.length)appState.errors.push(...r.errors.map(e=>({file:f.name,msg:e})));
             if(r.queries.length>0){appState.files.push(f.name);appState.queries.push(...r.queries);}
             else appState.errors.push({file:f.name,msg:'No Power Query code found'});
@@ -816,7 +882,7 @@ async function processFiles(files){
         applyFileSelection();
     }else{
         document.getElementById('dropZone').style.display='block';
-        if(!noQueryErrors.length)showToast('No Power Query code found. Check Data > Queries in Excel.','warning');
+        if(!noQueryErrors.length)showToast('No Power Query code found. For Excel, check Data > Queries.','warning');
     }
 }
 
@@ -837,7 +903,7 @@ async function readDir(de,files){
     await new Promise(res=>{(function rb(){rd.readEntries(ents=>{if(!ents.length)return res();all.push(...ents);rb();});})();});
     for(const e of all){
         if(e.isDirectory)await readDir(e,files);
-        else if(e.name.match(/\.xlsx$/i))files.push(await new Promise(r=>e.file(r)));
+        else if(isSupportedFile(e.name))files.push(await new Promise(r=>e.file(r)));
     }
 }
 
@@ -845,7 +911,7 @@ async function readHandle(h,files){
     if(!h)return;
     if(h.kind==='file'){
         const f=await h.getFile();
-        if(f&&f.name.match(/\.xlsx$/i))files.push(f);
+        if(f&&isSupportedFile(f.name))files.push(f);
         return;
     }
     if(h.kind==='directory'){
@@ -878,18 +944,18 @@ dz.addEventListener('drop',async e=>{
             }catch(err){}
         }
         const en=it.webkitGetAsEntry?.();
-        if(en){if(en.isDirectory)await readDir(en,files);else if(en.name.match(/\.xlsx$/i)){const f=it.getAsFile();if(f)files.push(f);}continue;}
+        if(en){if(en.isDirectory)await readDir(en,files);else if(isSupportedFile(en.name)){const f=it.getAsFile();if(f)files.push(f);}continue;}
         const f=it.getAsFile();
-        if(f&&f.name.match(/\.xlsx$/i))files.push(f);
+        if(f&&isSupportedFile(f.name))files.push(f);
     }
     if(!files.length&&dt?.files){
-        for(const f of Array.from(dt.files))if(f.name.match(/\.xlsx$/i))files.push(f);
+        for(const f of Array.from(dt.files))if(isSupportedFile(f.name))files.push(f);
     }
     const finalFiles=uniqFiles(files);
-    if(finalFiles.length)await processFiles(finalFiles);else showToast('No .xlsx files found','warning');
+    if(finalFiles.length)await processFiles(finalFiles);else showToast('No supported files found (.xlsx, .pbix, .pbit)','warning');
 });
 dz.addEventListener('click',e=>{if(e.target.closest('.browse-btn')||e.target===fi)return;fi.click();});
-fi.addEventListener('change',async e=>{const f=Array.from(e.target.files).filter(f=>f.name.match(/\.xlsx$/i));if(f.length)await processFiles(f);});
+fi.addEventListener('change',async e=>{const f=Array.from(e.target.files).filter(f=>isSupportedFile(f.name));if(f.length)await processFiles(f);});
 
 document.getElementById('resetBtn').addEventListener('click',resetApp);
 

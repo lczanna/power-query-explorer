@@ -673,6 +673,121 @@ def test_browse_button(page):
     result("File input is hidden", not fi.is_visible())
 
 
+def test_pbix_simple(page):
+    """Test parsing a .pbix file with 3 queries."""
+    print("\n━━━ PBIX Simple (3 queries) ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.pbix"])
+
+    result("Main content visible", page.locator("#mainContent").is_visible())
+
+    files_stat = page.locator("#statFiles").inner_text()
+    result("Files count = 1", files_stat == "1", f"Got: {files_stat}")
+
+    queries_stat = page.locator("#statQueries").inner_text()
+    result("Queries count = 3", queries_stat == "3", f"Got: {queries_stat}")
+
+    chips = page.locator(".file-chip")
+    chip_text = chips.first.inner_text()
+    result("File chip shows '.pbix'", ".pbix" in chip_text, chip_text)
+
+    page.locator('.tab[data-tab="code"]').click()
+    page.wait_for_timeout(200)
+    actual_names = {el.inner_text() for el in page.locator(".query-name").all()}
+    expected_names = {"Query1", "SalesData", "EdgeLookup"}
+    result("Expected query names present", actual_names == expected_names, f"Got: {actual_names}")
+
+    result("No error log visible", not page.locator("#errorLog").is_visible())
+
+
+def test_pbix_multi_query(page):
+    """Test parsing a .pbix file with 5 queries and dependencies."""
+    print("\n━━━ PBIX Multi Query (5 queries + deps) ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["multi_query.pbix"])
+
+    queries_stat = page.locator("#statQueries").inner_text()
+    result("Queries count = 5", queries_stat == "5", f"Got: {queries_stat}")
+
+    deps_stat = page.locator("#statDeps").inner_text()
+    deps_val = int(deps_stat)
+    result("Dependencies > 0", deps_val > 0, f"Got: {deps_val}")
+
+    page.locator('.tab[data-tab="code"]').click()
+    page.wait_for_timeout(200)
+    expected_names = {"Query1", "RawOrders", "Customers", "OrdersWithCustomers", "SalesSummary"}
+    actual_names = {el.inner_text() for el in page.locator(".query-name").all()}
+    result("All 5 query names present", expected_names == actual_names,
+           f"Expected: {expected_names}, Got: {actual_names}")
+
+
+def test_pbit_simple(page):
+    """Test parsing a .pbit (template) file."""
+    print("\n━━━ PBIT Simple (3 queries) ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.pbit"])
+
+    result("Main content visible", page.locator("#mainContent").is_visible())
+
+    queries_stat = page.locator("#statQueries").inner_text()
+    result("Queries count = 3", queries_stat == "3", f"Got: {queries_stat}")
+
+    chips = page.locator(".file-chip")
+    chip_text = chips.first.inner_text()
+    result("File chip shows '.pbit'", ".pbit" in chip_text, chip_text)
+
+
+def test_pbit_schema_only(page):
+    """Test parsing a .pbit file that only has DataModelSchema (no DataMashup)."""
+    print("\n━━━ PBIT Schema-Only (DataModelSchema fallback) ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["schema_only.pbit"])
+
+    result("Main content visible", page.locator("#mainContent").is_visible())
+
+    queries_stat = page.locator("#statQueries").inner_text()
+    result("Queries count = 3", queries_stat == "3", f"Got: {queries_stat}")
+
+    page.locator('.tab[data-tab="code"]').click()
+    page.wait_for_timeout(200)
+    actual_names = {el.inner_text() for el in page.locator(".query-name").all()}
+    expected_names = {"SalesData", "Customers", "StartDate"}
+    result("Expected query names present", actual_names == expected_names, f"Got: {actual_names}")
+
+    result("No error log visible", not page.locator("#errorLog").is_visible())
+
+
+def test_mixed_xlsx_pbix(page):
+    """Test uploading .xlsx and .pbix files together."""
+    print("\n━━━ Mixed .xlsx + .pbix Upload ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx", "multi_query.pbix"])
+
+    files_stat = page.locator("#statFiles").inner_text()
+    result("Files count = 2", files_stat == "2", f"Got: {files_stat}")
+
+    queries_stat = page.locator("#statQueries").inner_text()
+    result("Queries count = 8 (3+5)", queries_stat == "8", f"Got: {queries_stat}")
+
+    chips = page.locator(".file-chip")
+    result("Two file chips shown", chips.count() == 2, f"Got: {chips.count()}")
+
+    page.locator('.tab[data-tab="graph"]').click()
+    page.wait_for_timeout(500)
+    legend = page.locator(".legend-item")
+    result("Graph legend has 2 entries", legend.count() == 2, f"Got: {legend.count()}")
+
+
 def test_no_console_errors(page):
     """Test that no JavaScript errors are logged on load."""
     print("\n━━━ Console Errors ━━━")
@@ -768,6 +883,11 @@ def _run_tests():
             test_dependency_count,
             test_browse_button,
             test_no_console_errors_after_upload,
+            test_pbix_simple,
+            test_pbix_multi_query,
+            test_pbit_simple,
+            test_pbit_schema_only,
+            test_mixed_xlsx_pbix,
         ]
 
         for test_fn in tests:
