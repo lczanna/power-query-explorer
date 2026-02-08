@@ -1418,7 +1418,7 @@ dz.addEventListener('drop',async e=>{
         const f=it.getAsFile();
         if(f&&isSupportedFile(f.name))files.push(f);
     }
-    if(!files.length&&dt?.files){
+    if(dt?.files){
         for(const f of Array.from(dt.files))if(isSupportedFile(f.name))files.push(f);
     }
     const finalFiles=uniqFiles(files);

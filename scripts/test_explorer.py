@@ -21,6 +21,7 @@ import os
 import sys
 import json
 import time
+import base64
 import subprocess
 import socket
 from pathlib import Path
@@ -356,6 +357,67 @@ def test_multi_file_upload(page):
     page.wait_for_timeout(200)
     sections = page.locator(".file-section")
     result("Two file sections in code panel", sections.count() == 2, f"Got: {sections.count()}")
+
+
+def test_drag_drop_partial_items_uses_files_list(page):
+    """Test drag/drop when DataTransfer.items is partial but DataTransfer.files has all files."""
+    print("\n━━━ Drag Drop (partial items list) ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+
+    f1 = TEST_DIR / "simple_query.xlsx"
+    f2 = TEST_DIR / "multi_query.xlsx"
+    payload = {
+        "f1_name": f1.name,
+        "f1_b64": base64.b64encode(f1.read_bytes()).decode("ascii"),
+        "f2_name": f2.name,
+        "f2_b64": base64.b64encode(f2.read_bytes()).decode("ascii"),
+    }
+
+    page.evaluate("""(payload) => {
+        const b64ToU8 = (s) => {
+            const bin = atob(s);
+            const out = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+            return out;
+        };
+
+        const f1 = new File([b64ToU8(payload.f1_b64)], payload.f1_name, {
+            type: "application/octet-stream",
+            lastModified: Date.now()
+        });
+        const f2 = new File([b64ToU8(payload.f2_b64)], payload.f2_name, {
+            type: "application/octet-stream",
+            lastModified: Date.now() + 1
+        });
+
+        // Simulate a browser/platform that exposes only the first file in items,
+        // while files correctly contains both.
+        const item1 = {
+            kind: "file",
+            getAsFile: () => f1,
+            webkitGetAsEntry: () => null
+        };
+
+        const mockDt = {
+            items: [item1],
+            files: [f1, f2]
+        };
+
+        const ev = new Event("drop", { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "dataTransfer", { value: mockDt });
+        document.getElementById("dropZone").dispatchEvent(ev);
+    }""", payload)
+
+    page.wait_for_function(
+        "() => !document.getElementById('loading').classList.contains('active')",
+        timeout=15000
+    )
+    page.wait_for_timeout(200)
+
+    files_stat = page.locator("#statFiles").inner_text()
+    result("Drag/drop uses DataTransfer.files to include all dropped files", files_stat == "2", f"Got: {files_stat}")
 
 
 def test_select_all_and_copy(page):
@@ -896,6 +958,7 @@ def _run_tests():
             test_stress,
             test_no_queries,
             test_multi_file_upload,
+            test_drag_drop_partial_items_uses_files_list,
             test_mixed_valid_invalid,
             test_select_all_and_copy,
             test_file_filter,
