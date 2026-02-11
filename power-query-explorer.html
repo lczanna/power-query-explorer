@@ -816,7 +816,8 @@ window.extractFromDataModel = async function(dataModelArrayBuffer, fileName) {
         .reset-btn svg { width: 14px; height: 14px; }
                 .reset-btn.visible { display: inline-flex; }
 
-        .header-stats { display: none; font-size: 11px; color: var(--text-secondary); white-space: nowrap; font-family: 'Cascadia Code','Fira Code','Consolas',monospace; }
+        .header-stats { display: none; font-size: 11px; color: var(--text-secondary); font-family: 'Cascadia Code','Fira Code','Consolas',monospace; line-height: 1.4; white-space: nowrap; }
+        .stats-break { display: none; }
         .prompt-dropdown { display: none; padding: 5px 8px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 12px; color: var(--text-primary); font-family: inherit; cursor: pointer; }
         .prompt-dropdown:focus { border-color: var(--accent-teal); outline: none; }
         header .btn-compact { display: none; padding: 6px 14px; font-size: 12px; }
@@ -828,7 +829,8 @@ window.extractFromDataModel = async function(dataModelArrayBuffer, fileName) {
         .compact header { padding: 10px 16px; margin-bottom: 0; border-radius: 0; box-shadow: none; border: none; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary); }
         .compact .logo { gap: 10px; }
         .compact .logo-icon { display: none; }
-        .compact h1 { font-size: 14px; }
+        .compact h1 { font-size: 14px; font-size: 0; }
+        .compact h1::after { content: 'PQ Explorer'; font-size: 14px; }
         .compact .subtitle { display: none; }
         .compact .header-stats { display: inline; }
         .compact .header-right { gap: 8px; }
@@ -845,7 +847,7 @@ window.extractFromDataModel = async function(dataModelArrayBuffer, fileName) {
         .compact .file-list { margin-top: 6px; margin-bottom: 6px; }
         .compact .tabs { margin-bottom: 0; }
 
-        .data-panel { display:none; background:var(--bg-secondary); border-radius:var(--radius-lg); border:1px solid var(--border-subtle); overflow:hidden; }
+        .data-panel { display:none; background:var(--bg-secondary); border-radius:0 0 var(--radius-lg) var(--radius-lg); border:1px solid var(--border-subtle); border-top:none; overflow:hidden; }
         .data-panel.active { display:block; }
         .data-toolbar { display:flex; align-items:center; justify-content:space-between; padding:10px 16px; border-bottom:1px solid var(--border-subtle); flex-wrap:wrap; gap:8px; }
         .data-sheet-list { display:flex; gap:4px; flex-wrap:wrap; align-items:center; }
@@ -979,7 +981,7 @@ window.extractFromDataModel = async function(dataModelArrayBuffer, fileName) {
         .tab:hover { color:var(--text-primary); }
         .tab.active { color:var(--accent-teal); border-bottom-color:var(--accent-teal); font-weight:600; }
 
-        .graph-panel { display:none; background:var(--bg-secondary); border-radius:var(--radius-lg); border:1px solid var(--border-subtle); overflow:hidden; }
+        .graph-panel { display:none; background:var(--bg-secondary); border-radius:0 0 var(--radius-lg) var(--radius-lg); border:1px solid var(--border-subtle); border-top:none; overflow:hidden; }
         .graph-panel.active { display:block; }
         .graph-toolbar { display:flex; align-items:center; justify-content:space-between; padding:10px 16px; border-bottom:1px solid var(--border-subtle); }
         .graph-controls { display:flex; gap:4px; }
@@ -993,9 +995,9 @@ window.extractFromDataModel = async function(dataModelArrayBuffer, fileName) {
         .graph-search input::placeholder { color:var(--text-dim); }
         #graph-container { width:100%; height:620px; }
 
-        .code-panel { display:none; background:var(--bg-secondary); border-radius:var(--radius-lg); border:1px solid var(--border-subtle); overflow:hidden; }
+        .code-panel { display:none; background:var(--bg-secondary); border-radius:0 0 var(--radius-lg) var(--radius-lg); border:1px solid var(--border-subtle); border-top:none; overflow:hidden; }
         .code-panel.active { display:block; }
-        .limitations-panel { display:none; background:var(--bg-secondary); border-radius:var(--radius-lg); border:1px solid var(--border-subtle); overflow:hidden; }
+        .limitations-panel { display:none; background:var(--bg-secondary); border-radius:0 0 var(--radius-lg) var(--radius-lg); border:1px solid var(--border-subtle); border-top:none; overflow:hidden; }
         .limitations-panel.active { display:block; }
         .limitations-inner { padding:18px 20px; }
         .limitations-inner h3 { font-size:14px; margin-bottom:10px; color:var(--text-secondary); }
@@ -1080,6 +1082,8 @@ window.extractFromDataModel = async function(dataModelArrayBuffer, fileName) {
             #graph-container { height:430px; }
             .code-toolbar { flex-direction:column; }
             .graph-search input { width:120px; }
+            .compact .header-stats { white-space: normal; }
+            .stats-break { display: block; }
         }
     </style>
 </head>
@@ -1550,7 +1554,7 @@ function updateStats(){
     document.getElementById('statQueries').textContent=nq;
     document.getElementById('statDeps').textContent=deps;
     document.getElementById('statTokens').textContent=tok;
-    document.getElementById('headerStats').textContent=nf+' files | '+nq+' queries | '+deps+' deps | '+tok+' tokens';
+    document.getElementById('headerStats').innerHTML=nf+' files | '+nq+' queries <span class="stats-break"></span>'+deps+' deps | '+tok+' tokens';
 }
 
 function renderFileList(){

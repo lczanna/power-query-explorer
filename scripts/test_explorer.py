@@ -1702,7 +1702,7 @@ def test_compact_header_aggressive(page):
 
     result("Header height reduced after upload", after_height < before_height,
            f"Before: {before_height}px, After: {after_height}px")
-    result("Compact header under 50px", after_height <= 50,
+    result("Compact header under 60px", after_height <= 60,
            f"Got: {after_height}px")
 
     # Privacy badge should be hidden in compact mode

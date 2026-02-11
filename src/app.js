@@ -311,7 +311,7 @@ function updateStats(){
     document.getElementById('statQueries').textContent=nq;
     document.getElementById('statDeps').textContent=deps;
     document.getElementById('statTokens').textContent=tok;
-    document.getElementById('headerStats').textContent=nf+' files | '+nq+' queries | '+deps+' deps | '+tok+' tokens';
+    document.getElementById('headerStats').innerHTML=nf+' files | '+nq+' queries <span class="stats-break"></span>'+deps+' deps | '+tok+' tokens';
 }
 
 function renderFileList(){
