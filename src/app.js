@@ -13,7 +13,7 @@ const PROMPT_TEMPLATES={
     document:'Generate documentation for these Power Query M scripts:\n1. Create a summary of each query\'s purpose\n2. Document the data flow from sources to final outputs\n3. List all parameters and their expected values\n4. Create a dependency diagram in Mermaid format\n\nHere are the queries:\n\n',
     errors:'Review these Power Query M scripts for potential errors and issues:\n1. Check for hardcoded values that should be parameters\n2. Identify missing error handling\n3. Flag potential null/empty value issues\n4. Check for type mismatches\n5. Identify queries that might fail with data changes\n\nHere are the queries:\n\n'
 };
-const FILE_COLORS=['#2fa89b','#4c86c8','#7a67c7','#c88a36','#c65364','#3e9b6c','#6f7f95','#9c6f4f','#5f8f8a','#8d6fae'];
+const FILE_COLORS=['#60c0a0','#4c86c8','#7a67c7','#c88a36','#c65364','#3e9b6c','#6f7f95','#9c6f4f','#5f8f8a','#8d6fae'];
 let appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null,worksheets:[],activeSheet:null,dataProfile:null};
 
 function escapeHtml(t){return typeof t!=='string'?'':t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
@@ -366,7 +366,7 @@ function renderGraph(){
         style:[
             {selector:'node',style:{'background-color':'data(color)','label':'data(label)','color':'#d5deea','font-size':'11px','font-family':"'Cascadia Code','Fira Code','Consolas',monospace",'text-valign':'bottom','text-margin-y':8,'width':24,'height':24,'border-width':2,'border-color':'data(color)','border-opacity':0.34,'background-opacity':0.86,'text-outline-color':'#111418','text-outline-width':2,'text-max-width':'150px','text-wrap':'ellipsis'}},
             {selector:'edge',style:{'width':1.8,'line-color':'#3e4b5d','target-arrow-color':'#3e4b5d','target-arrow-shape':'triangle','curve-style':'bezier','arrow-scale':0.75,'opacity':0.66}},
-            {selector:'node:selected',style:{'border-width':3,'border-color':'#2fa89b','border-opacity':1,'background-opacity':1}},
+            {selector:'node:selected',style:{'border-width':3,'border-color':'#60c0a0','border-opacity':1,'background-opacity':1}},
             {selector:'node.highlighted',style:{'border-width':3,'border-color':'#c88a36','border-opacity':1,'width':34,'height':34,'font-size':'13px','z-index':999}},
             {selector:'node.dimmed',style:{'opacity':0.15}},
             {selector:'edge.dimmed',style:{'opacity':0.05}}
