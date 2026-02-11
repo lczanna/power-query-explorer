@@ -1,0 +1,136 @@
+    <div class="container">
+        <div class="lib-missing" id="libMissing"><strong>Libraries failed to load.</strong> The embedded JSZip or Cytoscape library could not initialize. Try refreshing the page.</div>
+        <header>
+            <div class="logo">
+                <div class="logo-icon">PQ</div>
+                <div><h1>Power Query Explorer</h1><div class="subtitle">Extract &amp; visualize M code from Excel workbooks and Power BI files</div></div>
+            </div>
+            <div class="header-right">
+                <button class="reset-btn" id="resetBtn" title="Upload new files">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1,4 1,10 7,10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                    New files
+                </button>
+                <div class="privacy-badge">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    100% local, no network needed
+                </div>
+            </div>
+        </header>
+
+        <div class="drop-zone" id="dropZone">
+            <div class="drop-zone-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <h2>Drop your files here</h2>
+            <p>Drag Excel or Power BI files, or an entire folder</p>
+            <div class="file-types">
+                <span class="file-type-badge">.xlsx</span>
+                <span class="file-type-badge">.pbix</span>
+                <span class="file-type-badge">.pbit</span>
+            </div>
+            <label class="browse-btn">Browse Files<input type="file" id="fileInput" multiple accept=".xlsx,.pbix,.pbit"></label>
+        </div>
+
+        <div class="loading" id="loading"><div class="spinner-ring"></div><p>Extracting Power Query code&hellip;</p><div class="file-progress" id="fileProgress"></div></div>
+
+        <div class="error-log" id="errorLog">
+            <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Some files had issues</h4>
+            <ul id="errorList"></ul>
+        </div>
+
+        <div class="main-content" id="mainContent">
+            <div class="prompt-section" id="promptSection">
+                <div class="prompt-head">
+                    <h3><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/></svg> LLM Prompt Templates</h3>
+                    <div class="prompt-pill">Click to copy prompt + selected M code</div>
+                </div>
+                <p class="prompt-help">Each template copies the selected queries from the Code tab together with the prompt text.</p>
+                <div class="prompt-templates">
+                    <button class="prompt-template" data-prompt="analyze">Analyze dependencies &amp; consolidations</button>
+                    <button class="prompt-template" data-prompt="optimize">Find performance optimizations</button>
+                    <button class="prompt-template" data-prompt="document">Generate documentation</button>
+                    <button class="prompt-template" data-prompt="errors">Identify potential errors</button>
+                </div>
+            </div>
+            <div class="file-list" id="fileList"></div>
+            <div class="stats-bar">
+                <div class="stat"><span class="stat-value" id="statFiles">0</span><span class="stat-label">Files</span></div>
+                <div class="stat"><span class="stat-value" id="statQueries">0</span><span class="stat-label">Queries</span></div>
+                <div class="stat"><span class="stat-value" id="statDeps">0</span><span class="stat-label">Dependencies</span></div>
+                <div class="stat"><span class="stat-value" id="statTokens">~0</span><span class="stat-label">Est. Tokens</span></div>
+            </div>
+            <div class="tabs">
+                <button class="tab active" data-tab="graph">Dependency Graph</button>
+                <button class="tab" data-tab="code">Code (LLM Ready)</button>
+                <button class="tab" data-tab="data" id="dataTabBtn" style="display:none">Data</button>
+                <button class="tab" data-tab="limitations">Known Limitations</button>
+            </div>
+            <div class="graph-panel active" id="graphPanel">
+                <div class="graph-toolbar">
+                    <div class="graph-controls">
+                        <button class="graph-btn" id="graphZoomIn" title="Zoom in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                        <button class="graph-btn" id="graphZoomOut" title="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                        <button class="graph-btn" id="graphFit" title="Fit to view"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>
+                        <button class="graph-btn" id="graphRelayout" title="Re-layout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23,4 23,10 17,10"/><polyline points="1,20 1,14 7,14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+                    </div>
+                    <div class="graph-search">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input type="text" id="graphSearchInput" placeholder="Search queries&hellip;">
+                    </div>
+                </div>
+                <div id="graph-container"></div>
+            </div>
+            <div class="code-panel" id="codePanel">
+                <div class="code-toolbar">
+                    <div class="code-filters" id="codeFilters"></div>
+                    <div class="code-actions">
+                        <label class="include-profile-label" id="includeProfileWrap" style="display:none" title="Include column statistics (types, cardinality, sample values) in copied text"><input type="checkbox" id="includeProfileCb"> Data profile</label>
+                        <button class="btn" id="selectAllBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,11 12,14 22,4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>Select All</span></button>
+                        <button class="btn btn-primary" id="copyBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span id="copyBtnText">Copy Selected</span></button>
+                    </div>
+                </div>
+                <div class="code-content" id="codeContent"></div>
+            </div>
+            <div class="limitations-panel" id="limitationsPanel">
+                <div class="limitations-inner">
+                    <h3>Known Limitations</h3>
+                    <ul class="limitations-list">
+                        <li>Dependency detection is static text analysis and may miss dynamic/computed query references.</li>
+                        <li>The graph links query-to-query references only when both queries exist in uploaded files.</li>
+                        <li><code>File.Contents(...)</code> and <code>Folder.Contents(...)</code> are normalized to base names (for example, <code>Sales.xlsx</code>) from full paths.</li>
+                        <li>Only literal string paths in <code>File.Contents</code>/<code>Folder.Contents</code> are detected.</li>
+                        <li>If different folders contain the same base file name, cross-file hints can be ambiguous.</li>
+                        <li>Cross-file hints are informational only and are not executable links.</li>
+                        <li>The tool extracts M script text only; it does not execute M code or validate credentials/connections.</li>
+                        <li>Very unusual DataMashup/customXml variants may fail to parse.</li>
+                        <li><code>.xlsx</code>, <code>.pbix</code>, and <code>.pbit</code> files are supported. Other formats (e.g. <code>.xls</code>, <code>.xlsm</code>) are not.</li>
+                        <li>V3 <code>.pbix</code> files with compressed DataModel are supported via built-in XPress9 decompression (WASM). Very large files (&gt;100MB) may be slow to decompress.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="data-panel" id="dataPanel">
+                <div class="data-toolbar">
+                    <div class="data-sheet-list" id="dataSheetList"></div>
+                    <div class="data-actions">
+                        <button class="btn btn-small" id="exportCsvBtn" disabled>Export CSV</button>
+                        <button class="btn btn-small" id="exportParquetBtn" disabled>Export Parquet</button>
+                    </div>
+                </div>
+                <div class="data-preview" id="dataPreview">
+                    <div class="empty-state">Drop an .xlsx file to preview worksheet data</div>
+                </div>
+            </div>
+            <div class="keyboard-hints">
+                <div class="kbd-hint"><kbd>Ctrl</kbd>+<kbd>A</kbd> Select all</div>
+                <div class="kbd-hint"><kbd>Ctrl</kbd>+<kbd>C</kbd> Copy selected</div>
+                <div class="kbd-hint"><kbd>Esc</kbd> Reset</div>
+            </div>
+        </div>
+        <div class="footer-note">
+            <div>Files never leave your browser. You can also download this page as <code>power-query-explorer.html</code> and use it offline.</div>
+            <div>Built with JSZip, Cytoscape.js, and XPress9.</div>
+            <div>© 2026 <a href="https://www.linkedin.com/in/lucazanna/" target="_blank" rel="noopener noreferrer">Luca Zanna</a></div>
+        </div>
+    </div>
+    <div class="toast" id="toast"></div>
+    <div class="bottom-notice" id="bottomNotice"></div>

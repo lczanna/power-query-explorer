@@ -979,6 +979,649 @@ def test_no_console_errors_after_upload(page):
            f"Errors: {errors}" if errors else "")
 
 
+def test_compact_header(page):
+    """Test that header becomes compact after file upload and reverts on reset."""
+    print("\n━━━ Compact Header ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+
+    # Before upload: no compact class
+    container = page.locator(".container")
+    cls = container.get_attribute("class") or ""
+    result("No compact class before upload", "compact" not in cls, cls)
+
+    # Subtitle should be visible
+    subtitle = page.locator(".subtitle")
+    result("Subtitle visible before upload", subtitle.is_visible())
+
+    upload_files(page, ["simple_query.xlsx"])
+
+    # After upload: compact class present
+    cls = container.get_attribute("class") or ""
+    result("Compact class added after upload", "compact" in cls, cls)
+
+    # Subtitle should be hidden in compact mode
+    result("Subtitle hidden in compact mode", not subtitle.is_visible())
+
+    # Header should still show title
+    h1 = page.locator("h1")
+    result("Title still visible in compact mode", h1.is_visible())
+
+    # Reset should remove compact
+    page.locator("#resetBtn").click()
+    page.wait_for_timeout(300)
+    cls = container.get_attribute("class") or ""
+    result("Compact class removed after reset", "compact" not in cls, cls)
+    result("Subtitle visible again after reset", subtitle.is_visible())
+
+
+def test_data_tab_xlsx(page):
+    """Test Data tab appears for xlsx files and shows worksheet preview."""
+    print("\n━━━ Data Tab (xlsx) ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+
+    # Data tab should be hidden initially
+    data_tab = page.locator("#dataTabBtn")
+    result("Data tab hidden before upload", not data_tab.is_visible())
+
+    upload_files(page, ["simple_query.xlsx"])
+
+    # Data tab should be visible for xlsx files
+    result("Data tab visible after xlsx upload", data_tab.is_visible())
+
+    # Click data tab
+    data_tab.click()
+    page.wait_for_timeout(300)
+
+    # Data panel should be active
+    data_panel = page.locator("#dataPanel")
+    result("Data panel active after click", data_panel.is_visible())
+
+    # Sheet chips should be present
+    chips = page.locator(".data-sheet-chip")
+    result("At least one sheet chip shown", chips.count() > 0, f"Got: {chips.count()}")
+
+    # First chip should be active
+    first_chip_cls = chips.first.get_attribute("class") or ""
+    result("First sheet chip is active", "active" in first_chip_cls, first_chip_cls)
+
+    # Preview table should be rendered
+    table = page.locator(".data-preview table")
+    result("Preview table rendered", table.count() > 0)
+
+    # Table should have headers
+    headers = page.locator(".data-preview thead th")
+    result("Table has header cells", headers.count() > 0, f"Got: {headers.count()}")
+
+    # Row info should be shown
+    row_info = page.locator(".data-row-info")
+    result("Row info shown", row_info.is_visible())
+    row_text = row_info.inner_text()
+    result("Row info contains 'Showing'", "Showing" in row_text, row_text)
+
+
+def test_data_tab_pbix_hidden(page):
+    """Test Data tab does NOT appear for pbix files (no worksheet data)."""
+    print("\n━━━ Data Tab (pbix - hidden) ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.pbix"])
+
+    data_tab = page.locator("#dataTabBtn")
+    result("Data tab hidden for pbix-only upload", not data_tab.is_visible())
+
+
+def test_data_tab_mixed_xlsx_pbix(page):
+    """Test Data tab shows for mixed uploads with xlsx."""
+    print("\n━━━ Data Tab (mixed xlsx+pbix) ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx", "multi_query.pbix"])
+
+    data_tab = page.locator("#dataTabBtn")
+    result("Data tab visible when xlsx is in mix", data_tab.is_visible())
+
+    data_tab.click()
+    page.wait_for_timeout(300)
+
+    # Only xlsx sheets should be in the chips (pbix has no worksheet data)
+    chips = page.locator(".data-sheet-chip")
+    result("Sheet chips present", chips.count() > 0)
+
+    # Verify chips reference the xlsx file
+    chip_html = page.locator("#dataSheetList").inner_html()
+    result("Chips reference xlsx file", "simple_query.xlsx" in chip_html, chip_html[:200])
+
+
+def test_sheet_chip_selection(page):
+    """Test clicking sheet chips updates the preview."""
+    print("\n━━━ Sheet Chip Selection ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx", "multi_query.xlsx"])
+
+    page.locator("#dataTabBtn").click()
+    page.wait_for_timeout(300)
+
+    chips = page.locator(".data-sheet-chip")
+    chip_count = chips.count()
+    result("Multiple sheet chips for multi-file", chip_count >= 2, f"Got: {chip_count}")
+
+    # Click second chip
+    if chip_count >= 2:
+        chips.nth(1).click()
+        page.wait_for_timeout(300)
+
+        second_cls = chips.nth(1).get_attribute("class") or ""
+        result("Clicked chip becomes active", "active" in second_cls)
+
+        first_cls = chips.first.get_attribute("class") or ""
+        result("Previous chip deactivated", "active" not in first_cls, first_cls)
+
+
+def test_export_csv(page):
+    """Test CSV export button triggers download."""
+    print("\n━━━ CSV Export ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx"])
+
+    page.locator("#dataTabBtn").click()
+    page.wait_for_timeout(300)
+
+    # Export CSV button should be enabled (sheet auto-selected)
+    csv_btn = page.locator("#exportCsvBtn")
+    result("CSV export button visible", csv_btn.is_visible())
+    is_disabled = csv_btn.get_attribute("disabled")
+    result("CSV export button enabled", is_disabled is None, f"disabled={is_disabled}")
+
+    # Click and verify no JS error (actual download is handled by blob URL)
+    with page.expect_download() as download_info:
+        csv_btn.click()
+    download = download_info.value
+    result("CSV download triggered", download.suggested_filename.endswith(".csv"),
+           f"filename={download.suggested_filename}")
+
+    # Verify CSV content
+    content = download.path().read_text(encoding="utf-8-sig")
+    lines = content.strip().split("\n")
+    result("CSV has header + data rows", len(lines) >= 2, f"Got {len(lines)} lines")
+
+    # Toast should appear
+    page.wait_for_timeout(500)
+    toast = page.locator(".toast")
+    result("Success toast after CSV export", toast.is_visible())
+
+
+def test_export_parquet(page):
+    """Test Parquet export button triggers download."""
+    print("\n━━━ Parquet Export ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx"])
+
+    page.locator("#dataTabBtn").click()
+    page.wait_for_timeout(300)
+
+    parquet_btn = page.locator("#exportParquetBtn")
+    result("Parquet export button visible", parquet_btn.is_visible())
+    is_disabled = parquet_btn.get_attribute("disabled")
+    result("Parquet export button enabled", is_disabled is None, f"disabled={is_disabled}")
+
+    # Click and verify download triggers
+    with page.expect_download() as download_info:
+        parquet_btn.click()
+    download = download_info.value
+    result("Parquet download triggered", download.suggested_filename.endswith(".parquet"),
+           f"filename={download.suggested_filename}")
+
+    # Verify Parquet magic bytes: PAR1 header and footer
+    raw = download.path().read_bytes()
+    result("Parquet file starts with PAR1 magic", raw[:4] == b"PAR1", f"Got: {raw[:4]}")
+    result("Parquet file ends with PAR1 magic", raw[-4:] == b"PAR1", f"Got: {raw[-4:]}")
+    result("Parquet file has reasonable size", len(raw) > 50, f"Got: {len(raw)} bytes")
+
+
+def test_export_buttons_disabled_initially(page):
+    """Test export buttons are disabled when no sheet is selected."""
+    print("\n━━━ Export Buttons Disabled ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.pbix"])
+
+    # Force show data tab (even though pbix has no data)
+    page.evaluate("document.getElementById('dataTabBtn').style.display=''")
+    page.locator("#dataTabBtn").click()
+    page.wait_for_timeout(200)
+
+    csv_btn = page.locator("#exportCsvBtn")
+    parquet_btn = page.locator("#exportParquetBtn")
+    result("CSV button disabled without data", csv_btn.get_attribute("disabled") is not None)
+    result("Parquet button disabled without data", parquet_btn.get_attribute("disabled") is not None)
+
+
+def test_data_profile_checkbox(page):
+    """Test data profile checkbox visibility."""
+    print("\n━━━ Data Profile Checkbox ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+
+    # Profile checkbox wrapper has display:none initially
+    hidden = page.evaluate("() => document.getElementById('includeProfileWrap').style.display === 'none'")
+    result("Profile checkbox hidden initially", hidden)
+
+    upload_files(page, ["simple_query.xlsx"])
+
+    # Profile checkbox display should be cleared after xlsx upload
+    shown = page.evaluate("() => document.getElementById('includeProfileWrap').style.display !== 'none'")
+    result("Profile checkbox display enabled after xlsx upload", shown)
+
+    # Switch to code tab to make it actually visible
+    page.locator('.tab[data-tab="code"]').click()
+    page.wait_for_timeout(200)
+
+    profile_wrap = page.locator("#includeProfileWrap")
+    result("Profile checkbox visible in code panel", profile_wrap.is_visible())
+
+    # Should be unchecked by default
+    cb = page.locator("#includeProfileCb")
+    result("Profile checkbox unchecked by default", not cb.is_checked())
+
+
+def test_data_profile_pbix_hidden(page):
+    """Test data profile checkbox hidden for pbix-only uploads."""
+    print("\n━━━ Data Profile (pbix - hidden) ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.pbix"])
+
+    profile_wrap = page.locator("#includeProfileWrap")
+    result("Profile checkbox hidden for pbix-only", not profile_wrap.is_visible())
+
+
+def test_copy_with_data_profile(page):
+    """Test copy includes data profile when checkbox is checked."""
+    print("\n━━━ Copy with Data Profile ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx"])
+
+    page.locator('.tab[data-tab="code"]').click()
+    page.wait_for_timeout(200)
+
+    # Check the profile checkbox
+    page.locator("#includeProfileCb").check()
+    page.wait_for_timeout(100)
+    result("Profile checkbox checked", page.locator("#includeProfileCb").is_checked())
+
+    # Use evaluate to capture what would be copied (clipboard may not work in headless)
+    copied_text = page.evaluate("""() => {
+        const profile = document.getElementById('includeProfileCb').checked;
+        let extra = '';
+        if (profile && appState.worksheets.length > 0) {
+            extra = buildDataProfile(appState.worksheets);
+        }
+        return getSelCode() + (extra ? '\\n\\n' + extra : '');
+    }""")
+
+    result("Copied text includes Data Profile header", "Data Profile" in copied_text,
+           copied_text[:200] if len(copied_text) > 200 else copied_text)
+    result("Copied text includes column stats", "distinct" in copied_text,
+           copied_text[-300:] if len(copied_text) > 300 else copied_text)
+
+
+def test_copy_without_data_profile(page):
+    """Test copy does NOT include data profile when checkbox is unchecked."""
+    print("\n━━━ Copy without Data Profile ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx"])
+
+    page.locator('.tab[data-tab="code"]').click()
+    page.wait_for_timeout(200)
+
+    # Profile checkbox unchecked by default
+    result("Profile checkbox unchecked", not page.locator("#includeProfileCb").is_checked())
+
+    copied_text = page.evaluate("""() => {
+        const profile = document.getElementById('includeProfileCb').checked;
+        let extra = '';
+        if (profile && appState.worksheets.length > 0) {
+            extra = buildDataProfile(appState.worksheets);
+        }
+        return getSelCode() + (extra ? '\\n\\n' + extra : '');
+    }""")
+
+    result("Copied text does NOT include Data Profile", "Data Profile" not in copied_text,
+           copied_text[-200:] if len(copied_text) > 200 else copied_text)
+
+
+def test_prompt_template_with_profile(page):
+    """Test prompt template includes data profile when checkbox is checked."""
+    print("\n━━━ Prompt Template with Profile ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx"])
+
+    page.locator('.tab[data-tab="code"]').click()
+    page.wait_for_timeout(200)
+
+    # Check profile checkbox
+    page.locator("#includeProfileCb").check()
+    page.wait_for_timeout(100)
+
+    # Simulate what the prompt template copy would produce
+    copied_text = page.evaluate("""() => {
+        const profile = document.getElementById('includeProfileCb').checked;
+        let extra = '';
+        if (profile && appState.worksheets.length > 0) {
+            try { extra = buildDataProfile(appState.worksheets); } catch(e) {}
+        }
+        return getSelCode(PROMPT_TEMPLATES['analyze']) + (extra ? '\\n\\n' + extra : '');
+    }""")
+
+    result("Prompt template text includes analysis prompt", "Analyze" in copied_text or "analyze" in copied_text,
+           copied_text[:200])
+    result("Prompt template text includes data profile", "Data Profile" in copied_text,
+           copied_text[-200:] if len(copied_text) > 200 else copied_text)
+
+
+def test_data_profile_stats_accuracy(page):
+    """Test data profile computes reasonable statistics."""
+    print("\n━━━ Data Profile Stats ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx"])
+
+    # Call buildDataProfile directly
+    profile = page.evaluate("""() => {
+        if (!appState.worksheets.length) return '';
+        return buildDataProfile(appState.worksheets);
+    }""")
+
+    result("Profile text is non-empty", len(profile) > 0, f"Length: {len(profile)}")
+    result("Profile has header line", "Data Profile" in profile)
+    result("Profile mentions file name", "simple_query.xlsx" in profile, profile[:300])
+    result("Profile has distinct counts", "distinct" in profile)
+    result("Profile has null counts", "nulls" in profile or "empty" in profile)
+
+
+def test_compute_column_stats(page):
+    """Test computeColumnStats function directly."""
+    print("\n━━━ Column Stats Computation ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+
+    # Test numeric column
+    stats = page.evaluate("""() => {
+        return computeColumnStats('Price', ['10', '20', '30', '', '40']);
+    }""")
+    result("Numeric: distinct count", stats["distinct"] == 4, f"Got: {stats['distinct']}")
+    result("Numeric: null count", stats["nulls"] == 1, f"Got: {stats['nulls']}")
+    result("Numeric: isNumeric true", stats["isNumeric"] is True)
+    result("Numeric: min = 10", stats["min"] == 10, f"Got: {stats['min']}")
+    result("Numeric: max = 40", stats["max"] == 40, f"Got: {stats['max']}")
+    result("Numeric: avg = 25", stats["avg"] == 25, f"Got: {stats['avg']}")
+
+    # Test categorical column
+    stats2 = page.evaluate("""() => {
+        return computeColumnStats('Color', ['Red', 'Blue', 'Red', 'Green', 'Red', 'Blue']);
+    }""")
+    result("Categorical: distinct = 3", stats2["distinct"] == 3, f"Got: {stats2['distinct']}")
+    result("Categorical: nulls = 0", stats2["nulls"] == 0, f"Got: {stats2['nulls']}")
+    result("Categorical: top values present", stats2["top"] is not None and len(stats2["top"]) > 0)
+    result("Categorical: Red is top value", stats2["top"][0]["value"] == "Red" and stats2["top"][0]["count"] == 3,
+           f"Got: {stats2['top'][0]}" if stats2["top"] else "No top values")
+
+    # Test all-null column
+    stats3 = page.evaluate("""() => {
+        return computeColumnStats('Empty', ['', '', null, '']);
+    }""")
+    result("All-null: distinct = 0", stats3["distinct"] == 0, f"Got: {stats3['distinct']}")
+    result("All-null: nulls = 4", stats3["nulls"] == 4, f"Got: {stats3['nulls']}")
+
+
+def test_worksheet_extraction(page):
+    """Test extractWorksheetData parses xlsx worksheets correctly."""
+    print("\n━━━ Worksheet Extraction ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx"])
+
+    # Check appState.worksheets
+    ws_count = page.evaluate("() => appState.worksheets.length")
+    result("Worksheets extracted", ws_count > 0, f"Got: {ws_count}")
+
+    ws_info = page.evaluate("""() => {
+        if (!appState.worksheets.length) return null;
+        const ws = appState.worksheets[0];
+        return {
+            fileName: ws.fileName,
+            sheetName: ws.sheetName,
+            headerCount: ws.headers.length,
+            rowCount: ws.totalRows,
+            truncated: ws.truncated
+        };
+    }""")
+
+    if ws_info:
+        result("Worksheet has correct file name", ws_info["fileName"] == "simple_query.xlsx",
+               f"Got: {ws_info['fileName']}")
+        result("Worksheet has a sheet name", len(ws_info["sheetName"]) > 0, ws_info["sheetName"])
+        result("Worksheet has headers", ws_info["headerCount"] > 0, f"Got: {ws_info['headerCount']}")
+        result("Worksheet has rows", ws_info["rowCount"] >= 0, f"Got: {ws_info['rowCount']}")
+        result("Worksheet not truncated (small file)", ws_info["truncated"] is False)
+    else:
+        result("Worksheet info retrieved", False, "ws_info is None")
+
+
+def test_data_tab_reset(page):
+    """Test that reset clears data tab state."""
+    print("\n━━━ Data Tab Reset ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx"])
+
+    # Verify data tab is visible
+    result("Data tab visible before reset", page.locator("#dataTabBtn").is_visible())
+
+    # Switch to code tab and check profile checkbox
+    page.locator('.tab[data-tab="code"]').click()
+    page.wait_for_timeout(200)
+    result("Profile checkbox visible before reset", page.locator("#includeProfileWrap").is_visible())
+    page.locator("#includeProfileCb").check()
+    page.wait_for_timeout(100)
+
+    # Reset
+    page.locator("#resetBtn").click()
+    page.wait_for_timeout(300)
+
+    # Data tab should be hidden
+    result("Data tab hidden after reset", not page.locator("#dataTabBtn").is_visible())
+
+    # Profile checkbox display should be none
+    hidden = page.evaluate("() => document.getElementById('includeProfileWrap').style.display === 'none'")
+    result("Profile checkbox hidden after reset", hidden)
+    result("Profile checkbox unchecked after reset", not page.locator("#includeProfileCb").is_checked())
+
+    # appState.worksheets should be empty
+    ws_count = page.evaluate("() => appState.worksheets.length")
+    result("Worksheets cleared after reset", ws_count == 0, f"Got: {ws_count}")
+
+
+def test_csv_export_streaming(page):
+    """Test that CSV export uses streaming (chunked) approach."""
+    print("\n━━━ CSV Export Streaming ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx"])
+
+    page.locator("#dataTabBtn").click()
+    page.wait_for_timeout(300)
+
+    # Verify the exportCSV function uses setTimeout for yielding
+    has_streaming = page.evaluate("""() => {
+        const src = exportCSV.toString();
+        return src.includes('setTimeout') || src.includes('Promise');
+    }""")
+    result("exportCSV uses async yielding", has_streaming)
+
+    # Verify escapeCSVField handles edge cases
+    tests = page.evaluate("""() => {
+        return {
+            simple: escapeCSVField('hello'),
+            withComma: escapeCSVField('hello,world'),
+            withQuote: escapeCSVField('say "hi"'),
+            withNewline: escapeCSVField('line1\\nline2'),
+            nullVal: escapeCSVField(null),
+            emptyVal: escapeCSVField('')
+        };
+    }""")
+    result("CSV: simple value unquoted", tests["simple"] == "hello")
+    result("CSV: comma triggers quoting", tests["withComma"] == '"hello,world"')
+    result("CSV: quotes are escaped", tests["withQuote"] == '"say ""hi"""')
+    result("CSV: newline triggers quoting", tests["withNewline"] == '"line1\nline2"')
+    result("CSV: null becomes empty", tests["nullVal"] == "")
+    result("CSV: empty stays empty", tests["emptyVal"] == "")
+
+
+def test_parquet_export_structure(page):
+    """Test Parquet export produces a valid minimal Parquet file."""
+    print("\n━━━ Parquet Export Structure ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx"])
+
+    page.locator("#dataTabBtn").click()
+    page.wait_for_timeout(300)
+
+    # Verify the exportParquet function uses async yielding
+    has_streaming = page.evaluate("""() => {
+        const src = exportParquet.toString();
+        return src.includes('setTimeout') || src.includes('Promise');
+    }""")
+    result("exportParquet uses async yielding", has_streaming)
+
+    # Test buildParquetBuffer directly with small data
+    parquet_info = page.evaluate("""() => {
+        const buf = buildParquetBuffer(['Name', 'Age'], [['Alice', 'Bob'], ['30', '25']]);
+        return {
+            length: buf.length,
+            startMagic: String.fromCharCode(buf[0], buf[1], buf[2], buf[3]),
+            endMagic: String.fromCharCode(buf[buf.length-4], buf[buf.length-3], buf[buf.length-2], buf[buf.length-1])
+        };
+    }""")
+    result("Parquet buffer has PAR1 start", parquet_info["startMagic"] == "PAR1")
+    result("Parquet buffer has PAR1 end", parquet_info["endMagic"] == "PAR1")
+    result("Parquet buffer has reasonable size", parquet_info["length"] > 100, f"Got: {parquet_info['length']}")
+
+
+def test_col_ref_to_index(page):
+    """Test column reference to index conversion."""
+    print("\n━━━ Column Ref to Index ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+
+    results = page.evaluate("""() => {
+        return {
+            a1: colRefToIndex('A1'),
+            b3: colRefToIndex('B3'),
+            z1: colRefToIndex('Z1'),
+            aa1: colRefToIndex('AA1'),
+            az5: colRefToIndex('AZ5')
+        };
+    }""")
+    result("A1 -> 0", results["a1"] == 0, f"Got: {results['a1']}")
+    result("B3 -> 1", results["b3"] == 1, f"Got: {results['b3']}")
+    result("Z1 -> 25", results["z1"] == 25, f"Got: {results['z1']}")
+    result("AA1 -> 26", results["aa1"] == 26, f"Got: {results['aa1']}")
+    result("AZ5 -> 51", results["az5"] == 51, f"Got: {results['az5']}")
+
+
+def test_tab_switching_with_data(page):
+    """Test tab switching includes Data tab when worksheets exist."""
+    print("\n━━━ Tab Switching with Data ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx"])
+
+    # Switch to data tab
+    page.locator("#dataTabBtn").click()
+    page.wait_for_timeout(200)
+
+    result("Data panel visible", page.locator("#dataPanel").is_visible())
+    result("Graph panel hidden", not page.locator("#graphPanel").is_visible())
+    result("Code panel hidden", not page.locator("#codePanel").is_visible())
+
+    # Data tab should have active class
+    data_tab = page.locator("#dataTabBtn")
+    result("Data tab has active class", "active" in (data_tab.get_attribute("class") or ""))
+
+    # Switch to graph
+    page.locator('.tab[data-tab="graph"]').click()
+    page.wait_for_timeout(200)
+
+    result("Graph panel visible after switch", page.locator("#graphPanel").is_visible())
+    result("Data panel hidden after switch", not page.locator("#dataPanel").is_visible())
+
+    # Switch back to data
+    page.locator("#dataTabBtn").click()
+    page.wait_for_timeout(200)
+    result("Data panel visible again", page.locator("#dataPanel").is_visible())
+
+
+def test_no_console_errors_with_new_features(page):
+    """Test no JS errors occur with the new features (data tab, profile, exports)."""
+    print("\n━━━ Console Errors (New Features) ━━━")
+
+    errors = []
+    page.on("pageerror", lambda exc: errors.append(str(exc)))
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx"])
+
+    # Exercise all new features
+    page.locator("#dataTabBtn").click()
+    page.wait_for_timeout(300)
+
+    # Check profile checkbox
+    page.locator('.tab[data-tab="code"]').click()
+    page.wait_for_timeout(200)
+    page.locator("#includeProfileCb").check()
+    page.wait_for_timeout(100)
+
+    # Build profile
+    page.evaluate("""() => {
+        if (appState.worksheets.length > 0) buildDataProfile(appState.worksheets);
+    }""")
+
+    result("No JS errors exercising new features", len(errors) == 0,
+           f"Errors: {errors}" if errors else "")
+
+
 def main():
     global PASS, FAIL
 
@@ -1052,6 +1695,29 @@ def _run_tests():
             test_pbit_simple,
             test_pbit_schema_only,
             test_mixed_xlsx_pbix,
+            # New feature tests
+            test_compact_header,
+            test_data_tab_xlsx,
+            test_data_tab_pbix_hidden,
+            test_data_tab_mixed_xlsx_pbix,
+            test_sheet_chip_selection,
+            test_export_csv,
+            test_export_parquet,
+            test_export_buttons_disabled_initially,
+            test_data_profile_checkbox,
+            test_data_profile_pbix_hidden,
+            test_copy_with_data_profile,
+            test_copy_without_data_profile,
+            test_prompt_template_with_profile,
+            test_data_profile_stats_accuracy,
+            test_compute_column_stats,
+            test_worksheet_extraction,
+            test_data_tab_reset,
+            test_csv_export_streaming,
+            test_parquet_export_structure,
+            test_col_ref_to_index,
+            test_tab_switching_with_data,
+            test_no_console_errors_with_new_features,
         ]
 
         for test_fn in tests:
