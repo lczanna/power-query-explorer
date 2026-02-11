@@ -73,18 +73,30 @@
         .reset-btn svg { width: 14px; height: 14px; }
                 .reset-btn.visible { display: inline-flex; }
 
-        .compact header { padding: 4px 12px; margin-bottom: 8px; border-radius: var(--radius-sm); box-shadow: none; border-color: transparent; background: transparent; }
+        .header-stats { display: none; font-size: 12px; color: var(--text-muted); white-space: nowrap; font-family: 'Cascadia Code','Fira Code','Consolas',monospace; }
+        .prompt-dropdown { display: none; padding: 4px 8px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font-size: 11px; color: var(--text-secondary); font-family: inherit; cursor: pointer; }
+        .prompt-dropdown:focus { border-color: var(--accent-teal); outline: none; }
+        header .btn-compact { display: none; padding: 5px 12px; font-size: 11px; }
+        header .btn-compact svg { width: 12px; height: 12px; }
+        .header-profile-label { display:none; align-items:center; gap:4px; font-size:11px; color:var(--text-muted); cursor:pointer; font-weight:500; white-space:nowrap; }
+        .header-profile-label input { accent-color:var(--accent-teal); }
+
+        .compact header { padding: 4px 12px; margin-bottom: 0; border-radius: var(--radius-sm); box-shadow: none; border-color: transparent; background: transparent; }
         .compact .logo { gap: 8px; }
-        .compact .logo-icon { width: 24px; height: 24px; font-size: 10px; border-radius: 5px; }
-        .compact h1 { font-size: 14px; }
+        .compact .logo-icon { width: 22px; height: 22px; font-size: 9px; border-radius: 5px; }
+        .compact h1 { font-size: 13px; }
         .compact .subtitle { display: none; }
+        .compact .header-stats { display: inline; }
         .compact .header-right { gap: 6px; }
         .compact .privacy-badge { display: none; }
+        .compact .prompt-dropdown { display: inline-block; }
+        .compact .btn-compact { display: inline-flex; }
+        .compact .header-profile-label { display: flex; }
         .compact .reset-btn { padding: 4px 10px; font-size: 11px; }
-        .compact .stats-bar { margin-bottom: 8px; padding: 0; border: none; background: transparent; gap: 4px; }
-        .compact .stat { padding: 4px 10px; border-right: none; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); flex-direction: row; gap: 6px; }
-        .compact .stat-value { font-size: 13px; }
-        .compact .stat-label { font-size: 10px; margin-top: 0; }
+        .compact .prompt-section { display: none; }
+        .compact .stats-bar { display: none; }
+        .compact .file-list { margin-bottom: 6px; }
+        .compact .tabs { margin-bottom: 10px; }
 
         .data-panel { display:none; background:var(--bg-secondary); border-radius:var(--radius-lg); border:1px solid var(--border-subtle); overflow:hidden; }
         .data-panel.active { display:block; }

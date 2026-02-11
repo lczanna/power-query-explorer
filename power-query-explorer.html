@@ -814,18 +814,30 @@ window.extractFromDataModel = async function(dataModelArrayBuffer, fileName) {
         .reset-btn svg { width: 14px; height: 14px; }
                 .reset-btn.visible { display: inline-flex; }
 
-        .compact header { padding: 4px 12px; margin-bottom: 8px; border-radius: var(--radius-sm); box-shadow: none; border-color: transparent; background: transparent; }
+        .header-stats { display: none; font-size: 12px; color: var(--text-muted); white-space: nowrap; font-family: 'Cascadia Code','Fira Code','Consolas',monospace; }
+        .prompt-dropdown { display: none; padding: 4px 8px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font-size: 11px; color: var(--text-secondary); font-family: inherit; cursor: pointer; }
+        .prompt-dropdown:focus { border-color: var(--accent-teal); outline: none; }
+        header .btn-compact { display: none; padding: 5px 12px; font-size: 11px; }
+        header .btn-compact svg { width: 12px; height: 12px; }
+        .header-profile-label { display:none; align-items:center; gap:4px; font-size:11px; color:var(--text-muted); cursor:pointer; font-weight:500; white-space:nowrap; }
+        .header-profile-label input { accent-color:var(--accent-teal); }
+
+        .compact header { padding: 4px 12px; margin-bottom: 0; border-radius: var(--radius-sm); box-shadow: none; border-color: transparent; background: transparent; }
         .compact .logo { gap: 8px; }
-        .compact .logo-icon { width: 24px; height: 24px; font-size: 10px; border-radius: 5px; }
-        .compact h1 { font-size: 14px; }
+        .compact .logo-icon { width: 22px; height: 22px; font-size: 9px; border-radius: 5px; }
+        .compact h1 { font-size: 13px; }
         .compact .subtitle { display: none; }
+        .compact .header-stats { display: inline; }
         .compact .header-right { gap: 6px; }
         .compact .privacy-badge { display: none; }
+        .compact .prompt-dropdown { display: inline-block; }
+        .compact .btn-compact { display: inline-flex; }
+        .compact .header-profile-label { display: flex; }
         .compact .reset-btn { padding: 4px 10px; font-size: 11px; }
-        .compact .stats-bar { margin-bottom: 8px; padding: 0; border: none; background: transparent; gap: 4px; }
-        .compact .stat { padding: 4px 10px; border-right: none; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); flex-direction: row; gap: 6px; }
-        .compact .stat-value { font-size: 13px; }
-        .compact .stat-label { font-size: 10px; margin-top: 0; }
+        .compact .prompt-section { display: none; }
+        .compact .stats-bar { display: none; }
+        .compact .file-list { margin-bottom: 6px; }
+        .compact .tabs { margin-bottom: 10px; }
 
         .data-panel { display:none; background:var(--bg-secondary); border-radius:var(--radius-lg); border:1px solid var(--border-subtle); overflow:hidden; }
         .data-panel.active { display:block; }
@@ -1075,7 +1087,20 @@ window.extractFromDataModel = async function(dataModelArrayBuffer, fileName) {
                 <div class="logo-icon">PQ</div>
                 <div><h1>Power Query Explorer</h1><div class="subtitle">Extract &amp; visualize M code from Excel workbooks and Power BI files</div></div>
             </div>
+            <span class="header-stats" id="headerStats"></span>
             <div class="header-right">
+                <label class="header-profile-label" id="headerProfileWrap" style="display:none" title="Include column statistics in copied text"><input type="checkbox" id="headerProfileCb"> Data profile</label>
+                <select class="prompt-dropdown" id="promptDropdown" title="LLM prompt template">
+                    <option value="">No prompt</option>
+                    <option value="analyze">Analyze dependencies</option>
+                    <option value="optimize">Find optimizations</option>
+                    <option value="document">Generate documentation</option>
+                    <option value="errors">Identify errors</option>
+                </select>
+                <button class="btn btn-primary btn-compact" id="copyAllBtn" title="Copy prompt + selected M code">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    <span id="copyAllBtnText">Copy All</span>
+                </button>
                 <button class="reset-btn" id="resetBtn" title="Upload new files">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1,4 1,10 7,10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
                     New files
@@ -1513,10 +1538,12 @@ function updateStats(){
     const q=getActiveQueries(),qNames=new Set(q.map(x=>x.name));
     const deps=q.reduce((s,x)=>s+x.dependencies.filter(d=>qNames.has(d)).length,0);
     const chars=q.reduce((s,x)=>s+x.code.length+x.name.length+30,0);
-    document.getElementById('statFiles').textContent=getActiveFiles().length;
-    document.getElementById('statQueries').textContent=q.length;
+    const nf=getActiveFiles().length,nq=q.length,tok='~'+Math.round(chars/3.5).toLocaleString();
+    document.getElementById('statFiles').textContent=nf;
+    document.getElementById('statQueries').textContent=nq;
     document.getElementById('statDeps').textContent=deps;
-    document.getElementById('statTokens').textContent='~'+Math.round(chars/3.5).toLocaleString();
+    document.getElementById('statTokens').textContent=tok;
+    document.getElementById('headerStats').textContent=nf+' files | '+nq+' queries | '+deps+' deps | '+tok+' tokens';
 }
 
 function renderFileList(){
@@ -1672,6 +1699,7 @@ async function processFiles(files){
         if(appState.worksheets.length>0){
             document.getElementById('dataTabBtn').style.display='';
             document.getElementById('includeProfileWrap').style.display='';
+            document.getElementById('headerProfileWrap').style.display='';
         }
         applyFileSelection();
     }else{
@@ -1804,6 +1832,21 @@ document.querySelectorAll('.prompt-template').forEach(b=>{b.addEventListener('cl
     if(profile&&appState.worksheets.length>0){try{extra=buildDataProfile(appState.worksheets);}catch(e){}}
     copyClip(getSelCode(PROMPT_TEMPLATES[b.dataset.prompt])+(extra?'\n\n'+extra:''),'Prompt and selected M code copied');
 });});
+
+// Header Copy All button (compact mode)
+document.getElementById('copyAllBtn').addEventListener('click',()=>{
+    const key=document.getElementById('promptDropdown').value;
+    const prefix=key?PROMPT_TEMPLATES[key]:'';
+    const profile=document.getElementById('headerProfileCb').checked;
+    let extra='';
+    if(profile&&appState.worksheets.length>0){try{extra=buildDataProfile(appState.worksheets);}catch(e){}}
+    const code=getSelCode(prefix);
+    copyClip(code+(extra?'\n\n'+extra:''),prefix?'Prompt and selected M code copied':'Selected M code copied');
+});
+
+// Sync profile checkboxes between header and code panel
+document.getElementById('headerProfileCb').addEventListener('change',e=>{document.getElementById('includeProfileCb').checked=e.target.checked;});
+document.getElementById('includeProfileCb').addEventListener('change',e=>{document.getElementById('headerProfileCb').checked=e.target.checked;});
 
 // Graph controls
 document.getElementById('graphZoomIn').addEventListener('click',()=>{if(appState.cyInstance)appState.cyInstance.zoom(appState.cyInstance.zoom()*1.3);});

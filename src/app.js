@@ -304,10 +304,12 @@ function updateStats(){
     const q=getActiveQueries(),qNames=new Set(q.map(x=>x.name));
     const deps=q.reduce((s,x)=>s+x.dependencies.filter(d=>qNames.has(d)).length,0);
     const chars=q.reduce((s,x)=>s+x.code.length+x.name.length+30,0);
-    document.getElementById('statFiles').textContent=getActiveFiles().length;
-    document.getElementById('statQueries').textContent=q.length;
+    const nf=getActiveFiles().length,nq=q.length,tok='~'+Math.round(chars/3.5).toLocaleString();
+    document.getElementById('statFiles').textContent=nf;
+    document.getElementById('statQueries').textContent=nq;
     document.getElementById('statDeps').textContent=deps;
-    document.getElementById('statTokens').textContent='~'+Math.round(chars/3.5).toLocaleString();
+    document.getElementById('statTokens').textContent=tok;
+    document.getElementById('headerStats').textContent=nf+' files | '+nq+' queries | '+deps+' deps | '+tok+' tokens';
 }
 
 function renderFileList(){
@@ -463,6 +465,7 @@ async function processFiles(files){
         if(appState.worksheets.length>0){
             document.getElementById('dataTabBtn').style.display='';
             document.getElementById('includeProfileWrap').style.display='';
+            document.getElementById('headerProfileWrap').style.display='';
         }
         applyFileSelection();
     }else{
@@ -595,6 +598,21 @@ document.querySelectorAll('.prompt-template').forEach(b=>{b.addEventListener('cl
     if(profile&&appState.worksheets.length>0){try{extra=buildDataProfile(appState.worksheets);}catch(e){}}
     copyClip(getSelCode(PROMPT_TEMPLATES[b.dataset.prompt])+(extra?'\n\n'+extra:''),'Prompt and selected M code copied');
 });});
+
+// Header Copy All button (compact mode)
+document.getElementById('copyAllBtn').addEventListener('click',()=>{
+    const key=document.getElementById('promptDropdown').value;
+    const prefix=key?PROMPT_TEMPLATES[key]:'';
+    const profile=document.getElementById('headerProfileCb').checked;
+    let extra='';
+    if(profile&&appState.worksheets.length>0){try{extra=buildDataProfile(appState.worksheets);}catch(e){}}
+    const code=getSelCode(prefix);
+    copyClip(code+(extra?'\n\n'+extra:''),prefix?'Prompt and selected M code copied':'Selected M code copied');
+});
+
+// Sync profile checkboxes between header and code panel
+document.getElementById('headerProfileCb').addEventListener('change',e=>{document.getElementById('includeProfileCb').checked=e.target.checked;});
+document.getElementById('includeProfileCb').addEventListener('change',e=>{document.getElementById('headerProfileCb').checked=e.target.checked;});
 
 // Graph controls
 document.getElementById('graphZoomIn').addEventListener('click',()=>{if(appState.cyInstance)appState.cyInstance.zoom(appState.cyInstance.zoom()*1.3);});

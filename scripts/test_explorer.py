@@ -693,22 +693,28 @@ def test_keyboard_shortcuts(page):
 
 
 def test_prompt_templates(page):
-    """Test LLM prompt template buttons."""
+    """Test LLM prompt dropdown and Copy All button in compact header."""
     print("\n━━━ Prompt Templates ━━━")
 
     page.goto(BASE_URL)
     page.wait_for_load_state("networkidle")
     upload_files(page, ["simple_query.xlsx"])
 
-    page.locator('.tab[data-tab="code"]').click()
-    page.wait_for_timeout(200)
+    # Prompt dropdown in header (visible in compact mode)
+    dropdown = page.locator("#promptDropdown")
+    result("Prompt dropdown visible", dropdown.is_visible())
 
-    # 4 prompt template buttons
-    templates = page.locator(".prompt-template")
-    result("4 prompt template buttons", templates.count() == 4, f"Got: {templates.count()}")
+    # 5 options (No prompt + 4 templates)
+    options = dropdown.locator("option")
+    result("5 prompt options", options.count() == 5, f"Got: {options.count()}")
 
-    # Click first template (analyze)
-    templates.first.click()
+    # Select a prompt and click Copy All
+    dropdown.select_option("analyze")
+    page.wait_for_timeout(100)
+
+    copy_btn = page.locator("#copyAllBtn")
+    result("Copy All button visible", copy_btn.is_visible())
+    copy_btn.click()
     page.wait_for_timeout(500)
 
     toast = page.locator(".toast")
@@ -1703,10 +1709,14 @@ def test_compact_header_aggressive(page):
     badge_visible = page.locator(".privacy-badge").is_visible()
     result("Privacy badge hidden in compact mode", not badge_visible)
 
-    # Stats bar should have compact layout
-    stat_height = page.evaluate("() => document.querySelector('.stats-bar').offsetHeight")
-    result("Stats bar compact (under 45px)", stat_height <= 45,
-           f"Got: {stat_height}px")
+    # Stats bar hidden in compact mode, inline stats visible instead
+    stats_bar_hidden = page.evaluate("() => document.querySelector('.stats-bar').offsetParent === null")
+    result("Stats bar hidden in compact mode", stats_bar_hidden)
+
+    # Inline header stats visible
+    header_stats = page.locator("#headerStats")
+    result("Inline header stats visible", header_stats.is_visible())
+    result("Inline header stats has content", len(header_stats.text_content()) > 0, header_stats.text_content())
 
 
 def test_no_console_errors_with_new_features(page):

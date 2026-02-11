@@ -5,7 +5,20 @@
                 <div class="logo-icon">PQ</div>
                 <div><h1>Power Query Explorer</h1><div class="subtitle">Extract &amp; visualize M code from Excel workbooks and Power BI files</div></div>
             </div>
+            <span class="header-stats" id="headerStats"></span>
             <div class="header-right">
+                <label class="header-profile-label" id="headerProfileWrap" style="display:none" title="Include column statistics in copied text"><input type="checkbox" id="headerProfileCb"> Data profile</label>
+                <select class="prompt-dropdown" id="promptDropdown" title="LLM prompt template">
+                    <option value="">No prompt</option>
+                    <option value="analyze">Analyze dependencies</option>
+                    <option value="optimize">Find optimizations</option>
+                    <option value="document">Generate documentation</option>
+                    <option value="errors">Identify errors</option>
+                </select>
+                <button class="btn btn-primary btn-compact" id="copyAllBtn" title="Copy prompt + selected M code">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    <span id="copyAllBtnText">Copy All</span>
+                </button>
                 <button class="reset-btn" id="resetBtn" title="Upload new files">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1,4 1,10 7,10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
                     New files
