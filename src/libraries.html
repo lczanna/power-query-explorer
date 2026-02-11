@@ -509,9 +509,20 @@ function getDataSlice(abf, fileName) {
     // Try exact match first
     let entry = abf.fileMap.get(fileName);
     if (!entry) {
-        // Try case-insensitive match
+        // Try case-insensitive exact match
+        const lower = fileName.toLowerCase();
         for (const [key, val] of abf.fileMap) {
-            if (key.toLowerCase() === fileName.toLowerCase()) { entry = val; break; }
+            if (key.toLowerCase() === lower) { entry = val; break; }
+        }
+    }
+    if (!entry) {
+        // Try suffix/basename match (ABF paths are full Windows paths like \\?\C:\...\file.idf)
+        const lower = fileName.toLowerCase();
+        for (const [key, val] of abf.fileMap) {
+            const keyLower = key.toLowerCase();
+            if (keyLower.endsWith(lower) || keyLower.endsWith('\\' + lower) || keyLower.endsWith('/' + lower)) {
+                entry = val; break;
+            }
         }
     }
     if (!entry) throw new Error('File not found in ABF: ' + fileName);
@@ -679,6 +690,7 @@ function readSQLiteTables(dbBuf) {
 }
 
 // Expose for use by app.js
+window.decompressXpress9 = decompressXpress9;
 window.parseABF = parseABF;
 window.getDataSlice = getDataSlice;
 window.readSQLiteTables = readSQLiteTables;

@@ -1283,9 +1283,10 @@ function readStringDictionary(buf, pos, minDataId) {
 
         if (page.compressed) {
             page.storeTotalBits = dv.getUint32(pos, true); pos += 4;
-            pos += 4; // character_set_type_identifier
+            page.charSetTypeId = dv.getUint32(pos, true); pos += 4;
+            const charSetTypeId = page.charSetTypeId;
             const allocSize = Number(dv.getBigUint64(pos, true)); pos += 8;
-            pos += 1; // character_set_used
+            if (charSetTypeId !== 703122) pos += 1; // character_set_used (absent in type 703122)
             pos += 4; // ui_decode_bits
             page.encodeArray = new Uint8Array(buf.buffer, buf.byteOffset + pos, 128);
             pos += 128;
@@ -1301,6 +1302,12 @@ function readStringDictionary(buf, pos, minDataId) {
             pos += allocSize;
         }
 
+        // Verify end mark (0xABCDABCD); self-correct if format variant shifted pos
+        if (pos + 4 <= buf.byteLength && dv.getUint32(pos, true) !== 0xABCDABCD) {
+            for (let adj = -2; adj <= 2; adj++) {
+                if (adj !== 0 && pos + adj >= 0 && pos + adj + 4 <= buf.byteLength && dv.getUint32(pos + adj, true) === 0xABCDABCD) { pos += adj; break; }
+            }
+        }
         pos += 4; // string_store_end_mark
         pages.push(page);
     }
@@ -1330,10 +1337,16 @@ function readStringDictionary(buf, pos, minDataId) {
             const tree = buildHuffmanTree(fullEncode);
             const offsets = handlesByPage.get(pageId) || [];
 
+            const isUtf16 = page.charSetTypeId === 703122;
             for (let i = 0; i < offsets.length; i++) {
                 const startBit = offsets[i];
                 const endBit = (i + 1 < offsets.length) ? offsets[i + 1] : page.storeTotalBits;
-                const decoded = decodeHuffmanString(page.compressedBuffer, tree, startBit, endBit);
+                let decoded = decodeHuffmanString(page.compressedBuffer, tree, startBit, endBit);
+                if (isUtf16 && decoded.length >= 2) {
+                    const bytes = new Uint8Array(decoded.length);
+                    for (let j = 0; j < decoded.length; j++) bytes[j] = decoded.charCodeAt(j);
+                    decoded = new TextDecoder('utf-16le').decode(bytes);
+                }
                 dict.set(index, decoded);
                 index++;
             }
