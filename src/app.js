@@ -301,8 +301,10 @@ function getActiveQueries(){const s=getActiveFileSet();return appState.queries.f
 function applyFileSelection(){updateStats();renderFileList();renderGraph();renderCodePanel();renderDataPanel();}
 
 function updateStats(){
-    const q=getActiveQueries(),qNames=new Set(q.map(x=>x.name));
-    const deps=q.reduce((s,x)=>s+x.dependencies.filter(d=>qNames.has(d)).length,0);
+    const q=getActiveQueries();
+    const qByFile=new Map();for(const x of q){if(!qByFile.has(x.fileName))qByFile.set(x.fileName,new Set());qByFile.get(x.fileName).add(x.name);}
+    const qNames=new Set(q.map(x=>x.name));
+    const deps=q.reduce((s,x)=>s+x.dependencies.filter(d=>(qByFile.get(x.fileName)?.has(d))||qNames.has(d)).length,0);
     const chars=q.reduce((s,x)=>s+x.code.length+x.name.length+30,0);
     const nf=getActiveFiles().length,nq=q.length,tok='~'+Math.round(chars/3.5).toLocaleString();
     document.getElementById('statFiles').textContent=nf;
@@ -348,11 +350,13 @@ function renderGraph(){
     const activeQueries=getActiveQueries();
     if(!activeQueries.length){ct.innerHTML='<div class="empty-state">No files selected. Use the file legend above.</div>';return;}
     const cm={};appState.files.forEach((f,i)=>{cm[f]=FILE_COLORS[i%FILE_COLORS.length];});
+    const byFileAndName=new Map();for(const q of activeQueries)byFileAndName.set(q.fileName+'::'+q.name,q);
     const byName=new Map();for(const q of activeQueries)if(!byName.has(q.name))byName.set(q.name,q);
     const nodes=activeQueries.map(q=>({data:{id:q.fileName+'::'+q.name,label:q.name,fileName:q.fileName,color:cm[q.fileName]||'#8c99a8'}}));
     const nids=new Set(nodes.map(n=>n.data.id)),edges=[];
     for(const q of activeQueries)for(const dep of q.dependencies){
-        const dq=byName.get(dep);
+        // Only link dependencies within the same file
+        const dq=byFileAndName.get(q.fileName+'::'+dep);
         if(dq){
             const depId=dq.fileName+'::'+dq.name,queryId=q.fileName+'::'+q.name;
             if(nids.has(depId)&&nids.has(queryId)&&depId!==queryId)edges.push({data:{source:depId,target:queryId}});
