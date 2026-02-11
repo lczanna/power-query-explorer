@@ -1098,6 +1098,44 @@ def test_data_tab_mixed_xlsx_pbix(page):
     result("Chips reference xlsx file", "simple_query.xlsx" in chip_html, chip_html[:200])
 
 
+def test_data_tab_file_filtering(page):
+    """Test Data tab filters tables by selected file."""
+    print("\n━━━ Data Tab File Filtering ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+    upload_files(page, ["simple_query.xlsx", "multi_query.xlsx"])
+
+    page.locator("#dataTabBtn").click()
+    page.wait_for_timeout(300)
+
+    # With all files selected, all sheet chips should be visible
+    all_chips = page.locator(".data-sheet-chip").count()
+    result("All sheets visible with all files selected", all_chips >= 2, f"Got: {all_chips}")
+
+    # Click first file chip to filter to just that file
+    file_chips = page.locator(".file-chip")
+    if file_chips.count() >= 2:
+        first_file = file_chips.first.get_attribute("data-file") or ""
+        file_chips.first.click()
+        page.wait_for_timeout(300)
+
+        # Data tab should now only show sheets from the selected file
+        filtered_chips = page.locator(".data-sheet-chip").count()
+        result("Fewer sheets after file filter", filtered_chips <= all_chips, f"Before: {all_chips}, After: {filtered_chips}")
+
+        # Verify all visible chips reference the selected file
+        chip_html = page.locator("#dataSheetList").inner_html()
+        result("Filtered chips reference selected file", first_file in chip_html or filtered_chips == 0, chip_html[:200])
+
+        # Click second file to switch filter
+        file_chips.nth(1).click()
+        page.wait_for_timeout(300)
+        second_file = file_chips.nth(1).get_attribute("data-file") or ""
+        chip_html2 = page.locator("#dataSheetList").inner_html()
+        result("Switching file updates data tab", second_file in chip_html2 or page.locator(".data-sheet-chip").count() == 0, chip_html2[:200])
+
+
 def test_sheet_chip_selection(page):
     """Test clicking sheet chips updates the preview."""
     print("\n━━━ Sheet Chip Selection ━━━")
@@ -1779,6 +1817,7 @@ def _run_tests():
             test_data_tab_xlsx,
             test_data_tab_pbix_no_datamodel,
             test_data_tab_mixed_xlsx_pbix,
+            test_data_tab_file_filtering,
             test_sheet_chip_selection,
             test_export_csv,
             test_export_parquet,

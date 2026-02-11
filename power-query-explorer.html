@@ -1909,11 +1909,18 @@ function renderDataPanel(){
         preview.innerHTML='<div class="empty-state">Drop an .xlsx file to preview worksheet data</div>';
         return;
     }
+    const activeFiles=getActiveFileSet();
+    const filtered=appState.worksheets.filter(ws=>activeFiles.has(ws.fileName));
+    if(!filtered.length){
+        sheetList.innerHTML='';
+        preview.innerHTML='<div class="empty-state">No table data for the selected file(s)</div>';
+        return;
+    }
     let chips='';
-    for(const ws of appState.worksheets){
+    for(const ws of filtered){
         const isActive=appState.activeSheet&&appState.activeSheet.fileName===ws.fileName&&appState.activeSheet.sheetName===ws.sheetName;
         chips+='<button class="data-sheet-chip'+(isActive?' active':'')+'" data-file="'+escapeHtml(ws.fileName)+'" data-sheet="'+escapeHtml(ws.sheetName)+'">'+escapeHtml(ws.sheetName);
-        if(appState.worksheets.length>1)chips+=' <span style="opacity:0.5;font-size:10px">'+escapeHtml(ws.fileName)+'</span>';
+        if(filtered.length>1)chips+=' <span style="opacity:0.5;font-size:10px">'+escapeHtml(ws.fileName)+'</span>';
         chips+='</button>';
     }
     sheetList.innerHTML=chips;
@@ -1925,8 +1932,9 @@ function renderDataPanel(){
             chip.classList.add('active');
         });
     });
-    if(!appState.activeSheet&&appState.worksheets.length>0){
-        const first=appState.worksheets[0];
+    const activeStillVisible=appState.activeSheet&&filtered.some(ws=>ws.fileName===appState.activeSheet.fileName&&ws.sheetName===appState.activeSheet.sheetName);
+    if(!activeStillVisible&&filtered.length>0){
+        const first=filtered[0];
         appState.activeSheet={fileName:first.fileName,sheetName:first.sheetName};
         renderWorksheetPreview(first);
         const firstChip=sheetList.querySelector('.data-sheet-chip');
