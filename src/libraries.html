@@ -453,6 +453,236 @@ function readMCodeFromSQLite(dbBuf) {
     return queries;
 }
 
+// ═══ Full ABF Parser — extract any file from decompressed DataModel ═══
+
+function parseABF(data) {
+    // BackupLogHeader: UTF-16LE XML at offset 72, one page (4096 bytes)
+    let headerXml = '';
+    for (let i = 72; i < 4096 - 1; i += 2) {
+        const ch = data[i] | (data[i+1] << 8);
+        if (ch === 0) break;
+        headerXml += String.fromCharCode(ch);
+    }
+
+    const getXmlVal = (xml, tag) => { const m = xml.match(new RegExp('<' + tag + '>(.*?)</' + tag + '>')); return m ? m[1] : null; };
+    const vdOffset = parseInt(getXmlVal(headerXml, 'm_cbOffsetHeader'));
+    const vdSize = parseInt(getXmlVal(headerXml, 'DataSize'));
+    const errorCode = getXmlVal(headerXml, 'ErrorCode') === 'true';
+    if (!vdOffset || !vdSize) throw new Error('Invalid ABF BackupLogHeader');
+
+    // VirtualDirectory: UTF-8 XML
+    const vdText = new TextDecoder('utf-8').decode(data.subarray(vdOffset, vdOffset + vdSize));
+    const vdFiles = {};
+    const vdRe = /<BackupFile><Path>(.*?)<\/Path><Size>(\d+)<\/Size><m_cbOffsetHeader>(\d+)<\/m_cbOffsetHeader>/g;
+    let m, lastPath = null;
+    while ((m = vdRe.exec(vdText)) !== null) {
+        vdFiles[m[1]] = { size: parseInt(m[2]), offset: parseInt(m[3]) };
+        lastPath = m[1];
+    }
+
+    // BackupLog: last VD entry, UTF-16LE with BOM
+    if (!lastPath) throw new Error('Empty VirtualDirectory');
+    const logEntry = vdFiles[lastPath];
+    let logBytes = data.subarray(logEntry.offset, logEntry.offset + logEntry.size);
+    if (errorCode && logBytes.length > 4) logBytes = logBytes.subarray(0, logBytes.length - 4);
+
+    let logText;
+    if (logBytes[0] === 0xFF && logBytes[1] === 0xFE) logText = new TextDecoder('utf-16le').decode(logBytes.subarray(2));
+    else if (logBytes.length > 1 && logBytes[1] === 0) logText = new TextDecoder('utf-16le').decode(logBytes);
+    else logText = new TextDecoder('utf-8').decode(logBytes);
+
+    // Build StoragePath → VD entry mapping for all files
+    const fileMap = new Map();
+    const bfRe = /<BackupFile>[\s\S]*?<Path>(.*?)<\/Path>[\s\S]*?<StoragePath>(.*?)<\/StoragePath>/g;
+    while ((m = bfRe.exec(logText)) !== null) {
+        const fileName = m[1];
+        const storagePath = m[2];
+        if (vdFiles[storagePath]) {
+            fileMap.set(fileName, vdFiles[storagePath]);
+        }
+    }
+
+    return { data, fileMap };
+}
+
+function getDataSlice(abf, fileName) {
+    // Try exact match first
+    let entry = abf.fileMap.get(fileName);
+    if (!entry) {
+        // Try case-insensitive match
+        for (const [key, val] of abf.fileMap) {
+            if (key.toLowerCase() === fileName.toLowerCase()) { entry = val; break; }
+        }
+    }
+    if (!entry) throw new Error('File not found in ABF: ' + fileName);
+    return new Uint8Array(abf.data.buffer, abf.data.byteOffset + entry.offset, entry.size);
+}
+
+// ═══ Generic SQLite Table Reader — returns raw rows from any table ═══
+
+function readSQLiteTables(dbBuf) {
+    const buf = new Uint8Array(dbBuf instanceof ArrayBuffer ? dbBuf : dbBuf.buffer ? new Uint8Array(dbBuf.buffer, dbBuf.byteOffset, dbBuf.byteLength) : dbBuf);
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+
+    const magic = new TextDecoder('ascii').decode(buf.subarray(0, 16));
+    if (!magic.startsWith('SQLite format 3')) throw new Error('Invalid SQLite database');
+
+    const pageSize = dv.getUint16(16) || 65536;
+    const reserved = buf[20];
+    const usableSize = pageSize - reserved;
+
+    function getPage(num) { return buf.subarray((num - 1) * pageSize, num * pageSize); }
+
+    function readVarint(data, pos) {
+        let result = 0;
+        for (let i = 0; i < 8; i++) {
+            const b = data[pos + i];
+            result = result * 128 + (b & 0x7f);
+            if (!(b & 0x80)) return { v: result, n: i + 1 };
+        }
+        result = result * 256 + data[pos + 8];
+        return { v: result, n: 9 };
+    }
+
+    function readBE(data, pos, len) {
+        let val = 0;
+        for (let i = 0; i < len; i++) val = val * 256 + data[pos + i];
+        return val;
+    }
+
+    function readCellPayload(page, cellPtr) {
+        const { v: payloadLen, n: n1 } = readVarint(page, cellPtr);
+        const { v: rowid, n: n2 } = readVarint(page, cellPtr + n1);
+        let hdrStart = cellPtr + n1 + n2;
+
+        const maxLocal = usableSize - 35;
+        const minLocal = ((usableSize - 12) * 32 / 255 | 0) - 23;
+        let localSize;
+        if (payloadLen <= maxLocal) {
+            localSize = payloadLen;
+        } else {
+            localSize = minLocal + ((payloadLen - minLocal) % (usableSize - 4));
+            if (localSize > maxLocal) localSize = minLocal;
+        }
+
+        const payload = new Uint8Array(payloadLen);
+        payload.set(page.subarray(hdrStart, hdrStart + Math.min(localSize, payloadLen)));
+
+        if (localSize < payloadLen) {
+            let overflowPageNum = readBE(page, hdrStart + localSize, 4);
+            let written = localSize;
+            while (overflowPageNum !== 0 && written < payloadLen) {
+                const oPage = getPage(overflowPageNum);
+                overflowPageNum = readBE(oPage, 0, 4);
+                const avail = Math.min(usableSize - 4, payloadLen - written);
+                payload.set(oPage.subarray(4, 4 + avail), written);
+                written += avail;
+            }
+        }
+
+        return { payload, rowid };
+    }
+
+    function parseRecord(payload) {
+        const { v: headerLen, n: hb } = readVarint(payload, 0);
+        const types = [];
+        let pos = hb;
+        while (pos < headerLen) {
+            const { v: st, n: sn } = readVarint(payload, pos);
+            types.push(st);
+            pos += sn;
+        }
+
+        const values = [];
+        let dPos = headerLen;
+        for (const st of types) {
+            if (st === 0) { values.push(null); }
+            else if (st >= 1 && st <= 6) {
+                const lens = [0, 1, 2, 3, 4, 6, 8];
+                const len = lens[st];
+                let val = 0;
+                for (let i = 0; i < len; i++) val = val * 256 + payload[dPos + i];
+                if (len > 0 && payload[dPos] & 0x80) val -= (1 << (len * 8));
+                values.push(val);
+                dPos += len;
+            }
+            else if (st === 7) {
+                const f64 = new DataView(payload.buffer, payload.byteOffset + dPos, 8).getFloat64(0, false);
+                values.push(f64);
+                dPos += 8;
+            }
+            else if (st === 8) { values.push(0); }
+            else if (st === 9) { values.push(1); }
+            else if (st >= 12 && st % 2 === 0) {
+                const len = (st - 12) / 2;
+                values.push(payload.slice(dPos, dPos + len));
+                dPos += len;
+            }
+            else if (st >= 13 && st % 2 === 1) {
+                const len = (st - 13) / 2;
+                values.push(new TextDecoder('utf-8').decode(payload.subarray(dPos, dPos + len)));
+                dPos += len;
+            }
+            else { values.push(null); }
+        }
+        return values;
+    }
+
+    function readTable(rootPage) {
+        const rows = [];
+        function traverse(pageNum) {
+            const page = getPage(pageNum);
+            const hdrOff = pageNum === 1 ? 100 : 0;
+            const pageType = page[hdrOff];
+
+            if (pageType === 0x0d) {
+                const numCells = (page[hdrOff + 3] << 8) | page[hdrOff + 4];
+                for (let i = 0; i < numCells; i++) {
+                    const cellPtr = (page[hdrOff + 8 + i*2] << 8) | page[hdrOff + 8 + i*2 + 1];
+                    try {
+                        const { payload, rowid } = readCellPayload(page, cellPtr);
+                        rows.push({ rowid, values: parseRecord(payload) });
+                    } catch(e) { /* skip corrupt */ }
+                }
+            } else if (pageType === 0x05) {
+                const numCells = (page[hdrOff + 3] << 8) | page[hdrOff + 4];
+                const rightChild = readBE(page, hdrOff + 8, 4);
+                for (let i = 0; i < numCells; i++) {
+                    const cellPtr = (page[hdrOff + 12 + i*2] << 8) | page[hdrOff + 12 + i*2 + 1];
+                    const childPage = readBE(page, cellPtr, 4);
+                    traverse(childPage);
+                }
+                traverse(rightChild);
+            }
+        }
+        traverse(rootPage);
+        return rows;
+    }
+
+    // Parse sqlite_master to find root pages
+    const masterRows = readTable(1);
+    const tableRoots = {};
+    for (const row of masterRows) {
+        const [type, name, , rootpage] = row.values;
+        if (type === 'table' && typeof name === 'string') {
+            tableRoots[name] = rootpage;
+        }
+    }
+
+    return {
+        getTableRows(tableName) {
+            const root = tableRoots[tableName];
+            if (!root) return [];
+            return readTable(root);
+        }
+    };
+}
+
+// Expose for use by app.js
+window.parseABF = parseABF;
+window.getDataSlice = getDataSlice;
+window.readSQLiteTables = readSQLiteTables;
+
 // ═══ Main entry point ═══
 
 window.extractFromDataModel = async function(dataModelArrayBuffer, fileName) {

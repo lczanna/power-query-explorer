@@ -461,6 +461,236 @@ function readMCodeFromSQLite(dbBuf) {
     return queries;
 }
 
+// ═══ Full ABF Parser — extract any file from decompressed DataModel ═══
+
+function parseABF(data) {
+    // BackupLogHeader: UTF-16LE XML at offset 72, one page (4096 bytes)
+    let headerXml = '';
+    for (let i = 72; i < 4096 - 1; i += 2) {
+        const ch = data[i] | (data[i+1] << 8);
+        if (ch === 0) break;
+        headerXml += String.fromCharCode(ch);
+    }
+
+    const getXmlVal = (xml, tag) => { const m = xml.match(new RegExp('<' + tag + '>(.*?)</' + tag + '>')); return m ? m[1] : null; };
+    const vdOffset = parseInt(getXmlVal(headerXml, 'm_cbOffsetHeader'));
+    const vdSize = parseInt(getXmlVal(headerXml, 'DataSize'));
+    const errorCode = getXmlVal(headerXml, 'ErrorCode') === 'true';
+    if (!vdOffset || !vdSize) throw new Error('Invalid ABF BackupLogHeader');
+
+    // VirtualDirectory: UTF-8 XML
+    const vdText = new TextDecoder('utf-8').decode(data.subarray(vdOffset, vdOffset + vdSize));
+    const vdFiles = {};
+    const vdRe = /<BackupFile><Path>(.*?)<\/Path><Size>(\d+)<\/Size><m_cbOffsetHeader>(\d+)<\/m_cbOffsetHeader>/g;
+    let m, lastPath = null;
+    while ((m = vdRe.exec(vdText)) !== null) {
+        vdFiles[m[1]] = { size: parseInt(m[2]), offset: parseInt(m[3]) };
+        lastPath = m[1];
+    }
+
+    // BackupLog: last VD entry, UTF-16LE with BOM
+    if (!lastPath) throw new Error('Empty VirtualDirectory');
+    const logEntry = vdFiles[lastPath];
+    let logBytes = data.subarray(logEntry.offset, logEntry.offset + logEntry.size);
+    if (errorCode && logBytes.length > 4) logBytes = logBytes.subarray(0, logBytes.length - 4);
+
+    let logText;
+    if (logBytes[0] === 0xFF && logBytes[1] === 0xFE) logText = new TextDecoder('utf-16le').decode(logBytes.subarray(2));
+    else if (logBytes.length > 1 && logBytes[1] === 0) logText = new TextDecoder('utf-16le').decode(logBytes);
+    else logText = new TextDecoder('utf-8').decode(logBytes);
+
+    // Build StoragePath → VD entry mapping for all files
+    const fileMap = new Map();
+    const bfRe = /<BackupFile>[\s\S]*?<Path>(.*?)<\/Path>[\s\S]*?<StoragePath>(.*?)<\/StoragePath>/g;
+    while ((m = bfRe.exec(logText)) !== null) {
+        const fileName = m[1];
+        const storagePath = m[2];
+        if (vdFiles[storagePath]) {
+            fileMap.set(fileName, vdFiles[storagePath]);
+        }
+    }
+
+    return { data, fileMap };
+}
+
+function getDataSlice(abf, fileName) {
+    // Try exact match first
+    let entry = abf.fileMap.get(fileName);
+    if (!entry) {
+        // Try case-insensitive match
+        for (const [key, val] of abf.fileMap) {
+            if (key.toLowerCase() === fileName.toLowerCase()) { entry = val; break; }
+        }
+    }
+    if (!entry) throw new Error('File not found in ABF: ' + fileName);
+    return new Uint8Array(abf.data.buffer, abf.data.byteOffset + entry.offset, entry.size);
+}
+
+// ═══ Generic SQLite Table Reader — returns raw rows from any table ═══
+
+function readSQLiteTables(dbBuf) {
+    const buf = new Uint8Array(dbBuf instanceof ArrayBuffer ? dbBuf : dbBuf.buffer ? new Uint8Array(dbBuf.buffer, dbBuf.byteOffset, dbBuf.byteLength) : dbBuf);
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+
+    const magic = new TextDecoder('ascii').decode(buf.subarray(0, 16));
+    if (!magic.startsWith('SQLite format 3')) throw new Error('Invalid SQLite database');
+
+    const pageSize = dv.getUint16(16) || 65536;
+    const reserved = buf[20];
+    const usableSize = pageSize - reserved;
+
+    function getPage(num) { return buf.subarray((num - 1) * pageSize, num * pageSize); }
+
+    function readVarint(data, pos) {
+        let result = 0;
+        for (let i = 0; i < 8; i++) {
+            const b = data[pos + i];
+            result = result * 128 + (b & 0x7f);
+            if (!(b & 0x80)) return { v: result, n: i + 1 };
+        }
+        result = result * 256 + data[pos + 8];
+        return { v: result, n: 9 };
+    }
+
+    function readBE(data, pos, len) {
+        let val = 0;
+        for (let i = 0; i < len; i++) val = val * 256 + data[pos + i];
+        return val;
+    }
+
+    function readCellPayload(page, cellPtr) {
+        const { v: payloadLen, n: n1 } = readVarint(page, cellPtr);
+        const { v: rowid, n: n2 } = readVarint(page, cellPtr + n1);
+        let hdrStart = cellPtr + n1 + n2;
+
+        const maxLocal = usableSize - 35;
+        const minLocal = ((usableSize - 12) * 32 / 255 | 0) - 23;
+        let localSize;
+        if (payloadLen <= maxLocal) {
+            localSize = payloadLen;
+        } else {
+            localSize = minLocal + ((payloadLen - minLocal) % (usableSize - 4));
+            if (localSize > maxLocal) localSize = minLocal;
+        }
+
+        const payload = new Uint8Array(payloadLen);
+        payload.set(page.subarray(hdrStart, hdrStart + Math.min(localSize, payloadLen)));
+
+        if (localSize < payloadLen) {
+            let overflowPageNum = readBE(page, hdrStart + localSize, 4);
+            let written = localSize;
+            while (overflowPageNum !== 0 && written < payloadLen) {
+                const oPage = getPage(overflowPageNum);
+                overflowPageNum = readBE(oPage, 0, 4);
+                const avail = Math.min(usableSize - 4, payloadLen - written);
+                payload.set(oPage.subarray(4, 4 + avail), written);
+                written += avail;
+            }
+        }
+
+        return { payload, rowid };
+    }
+
+    function parseRecord(payload) {
+        const { v: headerLen, n: hb } = readVarint(payload, 0);
+        const types = [];
+        let pos = hb;
+        while (pos < headerLen) {
+            const { v: st, n: sn } = readVarint(payload, pos);
+            types.push(st);
+            pos += sn;
+        }
+
+        const values = [];
+        let dPos = headerLen;
+        for (const st of types) {
+            if (st === 0) { values.push(null); }
+            else if (st >= 1 && st <= 6) {
+                const lens = [0, 1, 2, 3, 4, 6, 8];
+                const len = lens[st];
+                let val = 0;
+                for (let i = 0; i < len; i++) val = val * 256 + payload[dPos + i];
+                if (len > 0 && payload[dPos] & 0x80) val -= (1 << (len * 8));
+                values.push(val);
+                dPos += len;
+            }
+            else if (st === 7) {
+                const f64 = new DataView(payload.buffer, payload.byteOffset + dPos, 8).getFloat64(0, false);
+                values.push(f64);
+                dPos += 8;
+            }
+            else if (st === 8) { values.push(0); }
+            else if (st === 9) { values.push(1); }
+            else if (st >= 12 && st % 2 === 0) {
+                const len = (st - 12) / 2;
+                values.push(payload.slice(dPos, dPos + len));
+                dPos += len;
+            }
+            else if (st >= 13 && st % 2 === 1) {
+                const len = (st - 13) / 2;
+                values.push(new TextDecoder('utf-8').decode(payload.subarray(dPos, dPos + len)));
+                dPos += len;
+            }
+            else { values.push(null); }
+        }
+        return values;
+    }
+
+    function readTable(rootPage) {
+        const rows = [];
+        function traverse(pageNum) {
+            const page = getPage(pageNum);
+            const hdrOff = pageNum === 1 ? 100 : 0;
+            const pageType = page[hdrOff];
+
+            if (pageType === 0x0d) {
+                const numCells = (page[hdrOff + 3] << 8) | page[hdrOff + 4];
+                for (let i = 0; i < numCells; i++) {
+                    const cellPtr = (page[hdrOff + 8 + i*2] << 8) | page[hdrOff + 8 + i*2 + 1];
+                    try {
+                        const { payload, rowid } = readCellPayload(page, cellPtr);
+                        rows.push({ rowid, values: parseRecord(payload) });
+                    } catch(e) { /* skip corrupt */ }
+                }
+            } else if (pageType === 0x05) {
+                const numCells = (page[hdrOff + 3] << 8) | page[hdrOff + 4];
+                const rightChild = readBE(page, hdrOff + 8, 4);
+                for (let i = 0; i < numCells; i++) {
+                    const cellPtr = (page[hdrOff + 12 + i*2] << 8) | page[hdrOff + 12 + i*2 + 1];
+                    const childPage = readBE(page, cellPtr, 4);
+                    traverse(childPage);
+                }
+                traverse(rightChild);
+            }
+        }
+        traverse(rootPage);
+        return rows;
+    }
+
+    // Parse sqlite_master to find root pages
+    const masterRows = readTable(1);
+    const tableRoots = {};
+    for (const row of masterRows) {
+        const [type, name, , rootpage] = row.values;
+        if (type === 'table' && typeof name === 'string') {
+            tableRoots[name] = rootpage;
+        }
+    }
+
+    return {
+        getTableRows(tableName) {
+            const root = tableRoots[tableName];
+            if (!root) return [];
+            return readTable(root);
+        }
+    };
+}
+
+// Expose for use by app.js
+window.parseABF = parseABF;
+window.getDataSlice = getDataSlice;
+window.readSQLiteTables = readSQLiteTables;
+
 // ═══ Main entry point ═══
 
 window.extractFromDataModel = async function(dataModelArrayBuffer, fileName) {
@@ -572,16 +802,18 @@ window.extractFromDataModel = async function(dataModelArrayBuffer, fileName) {
         .reset-btn svg { width: 14px; height: 14px; }
                 .reset-btn.visible { display: inline-flex; }
 
-        .compact header { padding: 8px 16px; margin-bottom: 10px; border-radius: var(--radius-md); box-shadow: none; }
-        .compact .logo { gap: 10px; }
-        .compact .logo-icon { width: 28px; height: 28px; font-size: 11px; border-radius: var(--radius-sm); }
-        .compact h1 { font-size: 15px; }
+        .compact header { padding: 4px 12px; margin-bottom: 8px; border-radius: var(--radius-sm); box-shadow: none; border-color: transparent; background: transparent; }
+        .compact .logo { gap: 8px; }
+        .compact .logo-icon { width: 24px; height: 24px; font-size: 10px; border-radius: 5px; }
+        .compact h1 { font-size: 14px; }
         .compact .subtitle { display: none; }
-        .compact .header-right { gap: 8px; }
-        .compact .privacy-badge { padding: 3px 10px; font-size: 10.5px; }
-        .compact .stats-bar { margin-bottom: 10px; }
-        .compact .stat { padding: 8px 12px; }
-        .compact .stat-value { font-size: 15px; }
+        .compact .header-right { gap: 6px; }
+        .compact .privacy-badge { display: none; }
+        .compact .reset-btn { padding: 4px 10px; font-size: 11px; }
+        .compact .stats-bar { margin-bottom: 8px; padding: 0; border: none; background: transparent; gap: 4px; }
+        .compact .stat { padding: 4px 10px; border-right: none; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); flex-direction: row; gap: 6px; }
+        .compact .stat-value { font-size: 13px; }
+        .compact .stat-label { font-size: 10px; margin-top: 0; }
 
         .data-panel { display:none; background:var(--bg-secondary); border-radius:var(--radius-lg); border:1px solid var(--border-subtle); overflow:hidden; }
         .data-panel.active { display:block; }
@@ -1402,8 +1634,9 @@ async function processFiles(files){
             if(r.errors.length)appState.errors.push(...r.errors.map(e=>({file:f.name,msg:e})));
             if(r.queries.length>0){appState.files.push(f.name);appState.queries.push(...r.queries);}
             else appState.errors.push({file:f.name,msg:'No Power Query code found'});
-            // Extract worksheet data for xlsx files
+            // Extract worksheet/table data
             if(!isPbixFile(f.name)){try{const ws=await extractWorksheetData(f);appState.worksheets.push(...ws);}catch(e){}}
+            else{try{const ws=await extractPbixTableData(f);appState.worksheets.push(...ws);}catch(e){}}
         }catch(e){appState.errors.push({file:f.name,msg:e.message||'Failed to parse'});}
     }
 
@@ -1922,6 +2155,533 @@ function computeColumnStats(name,data){
         stat.top=[...freq.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([v,c])=>({value:String(v).substring(0,40),count:c}));
     }
     return stat;
+}
+
+// ═══ PBIX DataModel Table Data Extraction ═══
+
+function buildSchemaFromSQLite(db) {
+    const tableRows = db.getTableRows('Table');
+    const columnRows = db.getTableRows('Column');
+    const columnStorageRows = db.getTableRows('ColumnStorage');
+    const columnPartitionStorageRows = db.getTableRows('ColumnPartitionStorage');
+    const dictionaryStorageRows = db.getTableRows('DictionaryStorage');
+    const storageFileRows = db.getTableRows('StorageFile');
+    const attrHierRows = db.getTableRows('AttributeHierarchy');
+    const attrHierStorageRows = db.getTableRows('AttributeHierarchyStorage');
+
+    const tables = new Map();
+    for (const r of tableRows) tables.set(r.rowid, { name: r.values[2] });
+
+    const storageFiles = new Map();
+    for (const r of storageFileRows) storageFiles.set(r.rowid, r.values[4]);
+
+    const colStorageMap = new Map();
+    for (const r of columnStorageRows) {
+        colStorageMap.set(r.rowid, {
+            dictStorageId: r.values[4],
+            cardinality: r.values[11]
+        });
+    }
+
+    const dictStorageMap = new Map();
+    for (const r of dictionaryStorageRows) {
+        dictStorageMap.set(r.rowid, {
+            baseId: r.values[5],
+            magnitude: r.values[6],
+            isNullable: r.values[8],
+            storageFileId: r.values[12]
+        });
+    }
+
+    const colPartStorageMap = new Map();
+    for (const r of columnPartitionStorageRows) colPartStorageMap.set(r.values[1], r.values[6]);
+
+    const attrHierMap = new Map();
+    for (const r of attrHierRows) {
+        const colId = r.values[1];
+        const ahsId = r.values[3];
+        if (colId != null) attrHierMap.set(colId, ahsId);
+    }
+
+    const attrHierStorageMap = new Map();
+    for (const r of attrHierStorageRows) attrHierStorageMap.set(r.rowid, r.values[9]);
+
+    const result = new Map();
+
+    for (const r of columnRows) {
+        const colId = r.rowid;
+        const tableId = r.values[1];
+        const colName = r.values[2];
+        const dataType = r.values[4];
+        const colStorageId = r.values[18];
+        const colType = r.values[19];
+
+        if (colType !== 1 && colType !== 2) continue;
+
+        const tableInfo = tables.get(tableId);
+        if (!tableInfo) continue;
+        const tableName = tableInfo.name;
+
+        if (/^(LocalDateTable_|DateTableTemplate_|H\$|R\$|U\$)/.test(tableName)) continue;
+
+        const cs = colStorageMap.get(colStorageId);
+        if (!cs) continue;
+
+        const idfSfId = colPartStorageMap.get(colStorageId);
+        const idfFile = idfSfId != null ? storageFiles.get(idfSfId) : null;
+        if (!idfFile) continue;
+
+        let dictFile = null, baseId = 0, magnitude = 1, isNullable = false;
+        if (cs.dictStorageId != null) {
+            const ds = dictStorageMap.get(cs.dictStorageId);
+            if (ds) {
+                dictFile = ds.storageFileId != null ? storageFiles.get(ds.storageFileId) : null;
+                baseId = ds.baseId || 0;
+                magnitude = ds.magnitude || 1;
+                isNullable = !!ds.isNullable;
+            }
+        }
+
+        let hidxFile = null;
+        const ahsId = attrHierMap.get(colId);
+        if (ahsId != null) {
+            const sfId = attrHierStorageMap.get(ahsId);
+            if (sfId != null) hidxFile = storageFiles.get(sfId);
+        }
+
+        if (!result.has(tableName)) result.set(tableName, { columns: [] });
+
+        result.get(tableName).columns.push({
+            name: colName, idf: idfFile, dictionary: dictFile, hidx: hidxFile,
+            dataType, baseId, magnitude, isNullable, cardinality: cs.cardinality
+        });
+    }
+
+    return result;
+}
+
+function _buildFileCache(schema, abf) {
+    const cache = new Map();
+    const _get = (name) => {
+        if (cache.has(name)) return;
+        try { cache.set(name, getDataSlice(abf, name)); } catch (e) { /* skip missing */ }
+    };
+    for (const [, tableInfo] of schema) {
+        for (const col of tableInfo.columns) {
+            _get(col.idf);
+            _get(col.idf + 'meta');
+            if (col.dictionary) _get(col.dictionary);
+        }
+    }
+    return cache;
+}
+
+function readIdfMeta(buf) {
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    let pos = 0;
+
+    pos += 6; // CP tag
+    pos += 8; // version_one
+    pos += 6; // CS tag
+    pos += 8; // records
+    pos += 8; // one
+    const aba5a = dv.getUint32(pos, true); pos += 4;
+    const iterator = dv.getUint32(pos, true); pos += 4;
+    pos += 8; // bookmark_bits
+    pos += 8; // storage_alloc_size
+    pos += 8; // storage_used_size
+    pos += 1; // segment_needs_resizing
+    pos += 4; // compression_info
+
+    pos += 6; // SS tag
+    pos += 8; // distinct_states
+    const minDataId = dv.getUint32(pos, true); pos += 4;
+    pos += 4; // max_data_id
+    pos += 4; // original_min_segment_data_id
+    pos += 8; // rle_sort_order
+    const rowCount = Number(dv.getBigUint64(pos, true)); pos += 8;
+    pos += 1; // has_nulls
+    pos += 8; // rle_runs
+    pos += 8; // others_rle_runs
+    pos += 6; // SS end tag
+
+    pos += 1; // has_bit_packed_sub_seg
+    pos += 6; // CS1 tag
+    const countBitPacked = Number(dv.getBigUint64(pos, true));
+
+    const bitWidth = (36 - aba5a) + iterator;
+
+    return { minDataId, countBitPacked, bitWidth, rowCount };
+}
+
+function readIdf(buf) {
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    let pos = 0;
+
+    const primarySize = Number(dv.getBigUint64(pos, true)); pos += 8;
+    const primarySegment = [];
+    for (let i = 0; i < primarySize; i++) {
+        const dataValue = dv.getUint32(pos, true); pos += 4;
+        const repeatValue = dv.getUint32(pos, true); pos += 4;
+        primarySegment.push({ dataValue, repeatValue });
+    }
+
+    const subSegSize = Number(dv.getBigUint64(pos, true)); pos += 8;
+    const subSegment = [];
+    for (let i = 0; i < subSegSize; i++) {
+        subSegment.push(dv.getBigUint64(pos, true)); pos += 8;
+    }
+
+    return { primarySegment, subSegment };
+}
+
+function decodeRleBitPackedHybrid(idfData, meta) {
+    const { primarySegment, subSegment } = idfData;
+    const { minDataId, countBitPacked, bitWidth } = meta;
+
+    let bitpackedValues = [];
+    if (countBitPacked > 0 && subSegment.length > 0) {
+        if (subSegment.length === 1 && subSegment[0] === 0n) {
+            bitpackedValues = new Array(countBitPacked).fill(minDataId);
+        } else {
+            const mask = BigInt((1 << bitWidth) - 1);
+            const minId = BigInt(minDataId);
+            const bw = BigInt(bitWidth);
+            for (const u64 of subSegment) {
+                let val = u64;
+                const count = 64 / bitWidth;
+                for (let j = 0; j < count; j++) {
+                    bitpackedValues.push(Number(minId + (val & mask)));
+                    val >>= bw;
+                }
+            }
+        }
+    }
+
+    const vector = [];
+    let bpOffset = 0;
+
+    for (const entry of primarySegment) {
+        if ((entry.dataValue + bpOffset) === 0xFFFFFFFF) {
+            const count = entry.repeatValue;
+            for (let i = 0; i < count && bpOffset + i < bitpackedValues.length; i++) {
+                vector.push(bitpackedValues[bpOffset + i]);
+            }
+            bpOffset += count;
+        } else {
+            for (let i = 0; i < entry.repeatValue; i++) {
+                vector.push(entry.dataValue);
+            }
+        }
+    }
+
+    return vector;
+}
+
+function decompressEncodeArray(compressed) {
+    const full = new Array(256).fill(0);
+    for (let i = 0; i < 128; i++) {
+        full[2 * i] = compressed[i] & 0x0F;
+        full[2 * i + 1] = (compressed[i] >> 4) & 0x0F;
+    }
+    return full;
+}
+
+function buildHuffmanTree(encodeArray) {
+    const sorted = [];
+    for (let i = 0; i < 256; i++) {
+        if (encodeArray[i] !== 0) sorted.push([encodeArray[i], i]);
+    }
+    sorted.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+
+    const root = { left: null, right: null, c: 0 };
+    let code = 0, lastLen = 0;
+    for (const [len, ch] of sorted) {
+        if (lastLen !== len) {
+            code <<= (len - lastLen);
+            lastLen = len;
+        }
+        let node = root;
+        for (let bit = len - 1; bit >= 0; bit--) {
+            if (code & (1 << bit)) {
+                if (!node.right) node.right = { left: null, right: null, c: 0 };
+                node = node.right;
+            } else {
+                if (!node.left) node.left = { left: null, right: null, c: 0 };
+                node = node.left;
+            }
+        }
+        node.c = ch;
+        code++;
+    }
+    return root;
+}
+
+function decodeHuffmanString(bitstream, tree, startBit, endBit) {
+    let result = '';
+    let node = tree;
+    const totalBits = endBit - startBit;
+
+    for (let i = 0; i < totalBits; i++) {
+        let bitPos = startBit + i;
+        let bytePos = bitPos >> 3;
+        let bitOffset = bitPos & 7;
+        bytePos = (bytePos & ~1) + (1 - (bytePos & 1));
+
+        if (!node.left && !node.right) {
+            result += String.fromCharCode(node.c);
+            node = tree;
+        }
+
+        if (bitstream[bytePos] & (1 << (7 - bitOffset))) {
+            node = node.right;
+        } else {
+            node = node.left;
+        }
+    }
+
+    if (!node.left && !node.right) {
+        result += String.fromCharCode(node.c);
+    }
+
+    return result;
+}
+
+function readDictionary(buf, minDataId) {
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    let pos = 0;
+
+    const dictType = dv.getInt32(pos, true); pos += 4;
+    pos += 24; // hash_information
+
+    if (dictType === 2) return readStringDictionary(buf, pos, minDataId);
+    else if (dictType === 0 || dictType === 1) return readNumericDictionary(buf, pos, minDataId, dictType);
+    return new Map();
+}
+
+function readStringDictionary(buf, pos, minDataId) {
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const dict = new Map();
+
+    pos += 8; // store_string_count
+    pos += 1; // f_store_compressed
+    pos += 8; // store_longest_string
+    const pageCount = Number(dv.getBigInt64(pos, true)); pos += 8;
+
+    const pages = [];
+    for (let p = 0; p < pageCount; p++) {
+        const page = {};
+        pos += 8; // page_mask
+        pos += 1; // page_contains_nulls
+        pos += 8; // page_start_index
+        page.stringCount = Number(dv.getBigUint64(pos, true)); pos += 8;
+        page.compressed = buf[pos]; pos += 1;
+        pos += 4; // string_store_begin_mark
+
+        if (page.compressed) {
+            page.storeTotalBits = dv.getUint32(pos, true); pos += 4;
+            pos += 4; // character_set_type_identifier
+            const allocSize = Number(dv.getBigUint64(pos, true)); pos += 8;
+            pos += 1; // character_set_used
+            pos += 4; // ui_decode_bits
+            page.encodeArray = new Uint8Array(buf.buffer, buf.byteOffset + pos, 128);
+            pos += 128;
+            pos += 8; // ui64_buffer_size
+            page.compressedBuffer = new Uint8Array(buf.buffer, buf.byteOffset + pos, allocSize);
+            pos += allocSize;
+        } else {
+            pos += 8; // remaining_store_available
+            pos += 8; // buffer_used_characters
+            const allocSize = Number(dv.getBigUint64(pos, true)); pos += 8;
+            const textBytes = new Uint8Array(buf.buffer, buf.byteOffset + pos, allocSize);
+            page.text = new TextDecoder('utf-16le').decode(textBytes);
+            pos += allocSize;
+        }
+
+        pos += 4; // string_store_end_mark
+        pages.push(page);
+    }
+
+    const handleCount = Number(dv.getBigUint64(pos, true)); pos += 8;
+    pos += 4; // element_size
+
+    const handles = [];
+    for (let i = 0; i < handleCount; i++) {
+        const offset = dv.getUint32(pos, true); pos += 4;
+        const pageId = dv.getUint32(pos, true); pos += 4;
+        handles.push({ offset, pageId });
+    }
+
+    const handlesByPage = new Map();
+    for (const h of handles) {
+        if (!handlesByPage.has(h.pageId)) handlesByPage.set(h.pageId, []);
+        handlesByPage.get(h.pageId).push(h.offset);
+    }
+
+    let index = minDataId;
+    for (let pageId = 0; pageId < pages.length; pageId++) {
+        const page = pages[pageId];
+
+        if (page.compressed) {
+            const fullEncode = decompressEncodeArray(page.encodeArray);
+            const tree = buildHuffmanTree(fullEncode);
+            const offsets = handlesByPage.get(pageId) || [];
+
+            for (let i = 0; i < offsets.length; i++) {
+                const startBit = offsets[i];
+                const endBit = (i + 1 < offsets.length) ? offsets[i + 1] : page.storeTotalBits;
+                const decoded = decodeHuffmanString(page.compressedBuffer, tree, startBit, endBit);
+                dict.set(index, decoded);
+                index++;
+            }
+        } else {
+            const strings = page.text.split('\0');
+            if (strings.length > 0 && strings[strings.length - 1] === '') strings.pop();
+            for (const s of strings) {
+                dict.set(index, s);
+                index++;
+            }
+        }
+    }
+
+    return dict;
+}
+
+function readNumericDictionary(buf, pos, minDataId, dictType) {
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const dict = new Map();
+
+    const count = Number(dv.getBigUint64(pos, true)); pos += 8;
+    const elemSize = dv.getUint32(pos, true); pos += 4;
+
+    for (let i = 0; i < count; i++) {
+        let val;
+        if (elemSize === 4) {
+            val = dv.getInt32(pos, true); pos += 4;
+        } else if (elemSize === 8 && dictType === 0) {
+            val = Number(dv.getBigInt64(pos, true)); pos += 8;
+        } else {
+            val = dv.getFloat64(pos, true); pos += 8;
+        }
+        dict.set(minDataId + i, val);
+    }
+
+    return dict;
+}
+
+function convertColumnValue(value, dataType) {
+    if (value == null) return null;
+    switch (dataType) {
+        case 9: return new Date((value - 25569) * 86400000);
+        case 10: return value / 10000;
+        default: return value;
+    }
+}
+
+function _extractColumn(col, fileCache) {
+    let meta;
+    try {
+        const metaBuf = fileCache.get(col.idf + 'meta');
+        if (!metaBuf) return null;
+        meta = readIdfMeta(metaBuf);
+    } catch (e) { return null; }
+
+    const idfBuf = fileCache.get(col.idf);
+    if (!idfBuf) return null;
+
+    const indices = decodeRleBitPackedHybrid(readIdf(idfBuf), meta);
+
+    if (col.dictionary) {
+        try {
+            const dictBuf = fileCache.get(col.dictionary);
+            if (!dictBuf) return indices;
+            const dict = readDictionary(dictBuf, meta.minDataId);
+            return indices.map(idx => {
+                const v = dict.get(idx);
+                return v !== undefined ? convertColumnValue(v, col.dataType) : null;
+            });
+        } catch (e) { return indices; }
+    } else if (col.hidx) {
+        return indices.map(idx => convertColumnValue((idx + col.baseId) / col.magnitude, col.dataType));
+    }
+    return indices;
+}
+
+function extractTableData(tableName, schema, fileCache) {
+    const tableSchema = schema.get(tableName);
+    if (!tableSchema) throw new Error('Table not found: ' + tableName);
+
+    const columns = [];
+    const columnData = [];
+
+    for (const col of tableSchema.columns) {
+        const values = _extractColumn(col, fileCache);
+        if (values === null) continue;
+        columns.push(col.name);
+        columnData.push(values);
+    }
+
+    const rowCount = columnData.reduce((max, c) => Math.max(max, c.length), 0);
+    return { columns, columnData, rowCount };
+}
+
+function formatPbixValue(val) {
+    if (val == null) return '';
+    if (val instanceof Date) {
+        if (isNaN(val.getTime())) return '';
+        return val.toISOString().replace('T', ' ').replace(/\.000Z$/, '');
+    }
+    return String(val);
+}
+
+async function extractPbixTableData(file) {
+    const zip = await JSZip.loadAsync(file);
+    const dmEntry = zip.files['DataModel'] || zip.files['datamodel'];
+    if (!dmEntry) return [];
+
+    if (typeof parseABF !== 'function' || typeof getDataSlice !== 'function' || typeof readSQLiteTables !== 'function') return [];
+
+    const dmData = await dmEntry.async('arraybuffer');
+    const decompressed = await decompressXpress9(dmData);
+    const abf = parseABF(decompressed);
+    const sqliteBuf = getDataSlice(abf, 'metadata.sqlitedb');
+    const db = readSQLiteTables(sqliteBuf);
+    const schema = buildSchemaFromSQLite(db);
+    const fileCache = _buildFileCache(schema, abf);
+
+    const MAX_ROWS = 10000;
+    const sheets = [];
+
+    for (const tableName of Array.from(schema.keys()).sort()) {
+        try {
+            const td = extractTableData(tableName, schema, fileCache);
+            if (td.columns.length === 0) continue;
+
+            const headers = td.columns;
+            const totalRows = td.rowCount;
+            const rowLimit = Math.min(totalRows, MAX_ROWS);
+            const rows = [];
+
+            for (let r = 0; r < rowLimit; r++) {
+                const row = [];
+                for (let c = 0; c < td.columnData.length; c++) {
+                    row.push(formatPbixValue(td.columnData[c][r]));
+                }
+                rows.push(row);
+            }
+
+            sheets.push({
+                fileName: file.name,
+                sheetName: tableName,
+                headers,
+                rows,
+                totalRows,
+                truncated: totalRows > MAX_ROWS
+            });
+        } catch (e) { /* skip tables that fail to decode */ }
+    }
+
+    return sheets;
 }
 
 // ═══ Export Button Handlers ═══

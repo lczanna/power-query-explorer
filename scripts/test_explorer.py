@@ -1063,16 +1063,16 @@ def test_data_tab_xlsx(page):
     result("Row info contains 'Showing'", "Showing" in row_text, row_text)
 
 
-def test_data_tab_pbix_hidden(page):
-    """Test Data tab does NOT appear for pbix files (no worksheet data)."""
-    print("\n━━━ Data Tab (pbix - hidden) ━━━")
+def test_data_tab_pbix_no_datamodel(page):
+    """Test Data tab does NOT appear for pbix files without DataModel (no table data)."""
+    print("\n━━━ Data Tab (pbix without DataModel) ━━━")
 
     page.goto(BASE_URL)
     page.wait_for_load_state("networkidle")
     upload_files(page, ["simple_query.pbix"])
 
     data_tab = page.locator("#dataTabBtn")
-    result("Data tab hidden for pbix-only upload", not data_tab.is_visible())
+    result("Data tab hidden for pbix without DataModel", not data_tab.is_visible())
 
 
 def test_data_tab_mixed_xlsx_pbix(page):
@@ -1238,16 +1238,16 @@ def test_data_profile_checkbox(page):
     result("Profile checkbox unchecked by default", not cb.is_checked())
 
 
-def test_data_profile_pbix_hidden(page):
-    """Test data profile checkbox hidden for pbix-only uploads."""
-    print("\n━━━ Data Profile (pbix - hidden) ━━━")
+def test_data_profile_pbix_no_datamodel(page):
+    """Test data profile checkbox hidden for pbix without DataModel."""
+    print("\n━━━ Data Profile (pbix without DataModel) ━━━")
 
     page.goto(BASE_URL)
     page.wait_for_load_state("networkidle")
     upload_files(page, ["simple_query.pbix"])
 
     profile_wrap = page.locator("#includeProfileWrap")
-    result("Profile checkbox hidden for pbix-only", not profile_wrap.is_visible())
+    result("Profile checkbox hidden for pbix without DataModel", not profile_wrap.is_visible())
 
 
 def test_copy_with_data_profile(page):
@@ -1592,6 +1592,85 @@ def test_tab_switching_with_data(page):
     result("Data panel visible again", page.locator("#dataPanel").is_visible())
 
 
+def test_pbix_data_extraction_functions(page):
+    """Test PBIX data extraction functions are available and callable."""
+    print("\n━━━ PBIX Data Extraction Functions ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+
+    # Verify all extraction functions exist
+    funcs = page.evaluate("""() => {
+        return {
+            buildSchemaFromSQLite: typeof buildSchemaFromSQLite === 'function',
+            extractTableData: typeof extractTableData === 'function',
+            readIdfMeta: typeof readIdfMeta === 'function',
+            readIdf: typeof readIdf === 'function',
+            decodeRleBitPackedHybrid: typeof decodeRleBitPackedHybrid === 'function',
+            readDictionary: typeof readDictionary === 'function',
+            buildHuffmanTree: typeof buildHuffmanTree === 'function',
+            convertColumnValue: typeof convertColumnValue === 'function',
+            extractPbixTableData: typeof extractPbixTableData === 'function',
+            parseABF: typeof parseABF === 'function',
+            getDataSlice: typeof getDataSlice === 'function',
+            readSQLiteTables: typeof readSQLiteTables === 'function',
+        };
+    }""")
+
+    for name, available in funcs.items():
+        result(f"{name} function exists", available, f"missing")
+
+    # Test convertColumnValue
+    cv_tests = page.evaluate("""() => {
+        const dt = convertColumnValue(44927, 9);  // 2023-01-01
+        const dec = convertColumnValue(12345, 10);
+        const plain = convertColumnValue(42, 6);
+        const nil = convertColumnValue(null, 2);
+        return {
+            datetime_is_date: dt instanceof Date,
+            datetime_year: dt instanceof Date ? dt.getUTCFullYear() : null,
+            decimal: dec,
+            plain: plain,
+            nil: nil
+        };
+    }""")
+    result("convertColumnValue: datetime → Date", cv_tests["datetime_is_date"])
+    result("convertColumnValue: datetime year 2023", cv_tests["datetime_year"] == 2023, f"Got: {cv_tests['datetime_year']}")
+    result("convertColumnValue: decimal /10000", cv_tests["decimal"] == 1.2345, f"Got: {cv_tests['decimal']}")
+    result("convertColumnValue: plain passthrough", cv_tests["plain"] == 42)
+    result("convertColumnValue: null passthrough", cv_tests["nil"] is None)
+
+
+def test_compact_header_aggressive(page):
+    """Test compact header is dramatically smaller with aggressive CSS."""
+    print("\n━━━ Compact Header (aggressive) ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+
+    # Measure header height before upload
+    before_height = page.evaluate("() => document.querySelector('header').offsetHeight")
+
+    upload_files(page, ["simple_query.xlsx"])
+
+    # Measure header height after upload (compact mode)
+    after_height = page.evaluate("() => document.querySelector('header').offsetHeight")
+
+    result("Header height reduced after upload", after_height < before_height,
+           f"Before: {before_height}px, After: {after_height}px")
+    result("Compact header under 50px", after_height <= 50,
+           f"Got: {after_height}px")
+
+    # Privacy badge should be hidden in compact mode
+    badge_visible = page.locator(".privacy-badge").is_visible()
+    result("Privacy badge hidden in compact mode", not badge_visible)
+
+    # Stats bar should have compact layout
+    stat_height = page.evaluate("() => document.querySelector('.stats-bar').offsetHeight")
+    result("Stats bar compact (under 45px)", stat_height <= 45,
+           f"Got: {stat_height}px")
+
+
 def test_no_console_errors_with_new_features(page):
     """Test no JS errors occur with the new features (data tab, profile, exports)."""
     print("\n━━━ Console Errors (New Features) ━━━")
@@ -1698,14 +1777,14 @@ def _run_tests():
             # New feature tests
             test_compact_header,
             test_data_tab_xlsx,
-            test_data_tab_pbix_hidden,
+            test_data_tab_pbix_no_datamodel,
             test_data_tab_mixed_xlsx_pbix,
             test_sheet_chip_selection,
             test_export_csv,
             test_export_parquet,
             test_export_buttons_disabled_initially,
             test_data_profile_checkbox,
-            test_data_profile_pbix_hidden,
+            test_data_profile_pbix_no_datamodel,
             test_copy_with_data_profile,
             test_copy_without_data_profile,
             test_prompt_template_with_profile,
@@ -1717,6 +1796,8 @@ def _run_tests():
             test_parquet_export_structure,
             test_col_ref_to_index,
             test_tab_switching_with_data,
+            test_pbix_data_extraction_functions,
+            test_compact_header_aggressive,
             test_no_console_errors_with_new_features,
         ]
 

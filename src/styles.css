@@ -73,16 +73,18 @@
         .reset-btn svg { width: 14px; height: 14px; }
                 .reset-btn.visible { display: inline-flex; }
 
-        .compact header { padding: 8px 16px; margin-bottom: 10px; border-radius: var(--radius-md); box-shadow: none; }
-        .compact .logo { gap: 10px; }
-        .compact .logo-icon { width: 28px; height: 28px; font-size: 11px; border-radius: var(--radius-sm); }
-        .compact h1 { font-size: 15px; }
+        .compact header { padding: 4px 12px; margin-bottom: 8px; border-radius: var(--radius-sm); box-shadow: none; border-color: transparent; background: transparent; }
+        .compact .logo { gap: 8px; }
+        .compact .logo-icon { width: 24px; height: 24px; font-size: 10px; border-radius: 5px; }
+        .compact h1 { font-size: 14px; }
         .compact .subtitle { display: none; }
-        .compact .header-right { gap: 8px; }
-        .compact .privacy-badge { padding: 3px 10px; font-size: 10.5px; }
-        .compact .stats-bar { margin-bottom: 10px; }
-        .compact .stat { padding: 8px 12px; }
-        .compact .stat-value { font-size: 15px; }
+        .compact .header-right { gap: 6px; }
+        .compact .privacy-badge { display: none; }
+        .compact .reset-btn { padding: 4px 10px; font-size: 11px; }
+        .compact .stats-bar { margin-bottom: 8px; padding: 0; border: none; background: transparent; gap: 4px; }
+        .compact .stat { padding: 4px 10px; border-right: none; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); flex-direction: row; gap: 6px; }
+        .compact .stat-value { font-size: 13px; }
+        .compact .stat-label { font-size: 10px; margin-top: 0; }
 
         .data-panel { display:none; background:var(--bg-secondary); border-radius:var(--radius-lg); border:1px solid var(--border-subtle); overflow:hidden; }
         .data-panel.active { display:block; }
