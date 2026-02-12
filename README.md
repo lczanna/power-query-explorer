@@ -31,7 +31,6 @@ python3 -m http.server 8000
 Then open:
 
 - `http://localhost:8000/`
-- or `http://localhost:8000/power-query-explorer.html`
 
 ### Test data and scripts
 
@@ -44,8 +43,7 @@ See `scripts/README.md` for commands.
 
 ### Repository structure
 
-- `power-query-explorer.html`: Main self-contained app.
-- `index.html`: GitHub Pages entrypoint (redirects to `power-query-explorer.html`).
+- `index.html`: Main self-contained app (served directly by GitHub Pages).
 - `data/test-files/`: Sample Excel and Power BI files used for validation and demos.
 - `scripts/`: Test-data generation and automated browser tests.
 - `pyproject.toml` + `uv.lock`: Python environment metadata for project scripts.
