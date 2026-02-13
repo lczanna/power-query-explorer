@@ -27,7 +27,7 @@ import socket
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
-HTML_PATH = Path(__file__).resolve().parent.parent / "power-query-explorer.html"
+HTML_PATH = Path(__file__).resolve().parent.parent / "index.html"
 TEST_DIR = Path(__file__).resolve().parent.parent / "data" / "test-files"
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
@@ -37,7 +37,7 @@ def find_free_port():
         return s.getsockname()[1]
 
 PORT = find_free_port()
-BASE_URL = f"http://localhost:{PORT}/power-query-explorer.html"
+BASE_URL = f"http://localhost:{PORT}/index.html"
 
 PASS = 0
 FAIL = 0
@@ -704,9 +704,9 @@ def test_prompt_templates(page):
     dropdown = page.locator("#promptDropdown")
     result("Prompt dropdown visible", dropdown.is_visible())
 
-    # 5 options (No prompt + 4 templates)
+    # 6 options (No prompt + 5 templates including roast)
     options = dropdown.locator("option")
-    result("5 prompt options", options.count() == 5, f"Got: {options.count()}")
+    result("6 prompt options", options.count() == 6, f"Got: {options.count()}")
 
     # Select a prompt and click Copy All
     dropdown.select_option("analyze")
@@ -1749,6 +1749,31 @@ def test_no_console_errors_with_new_features(page):
            f"Errors: {errors}" if errors else "")
 
 
+def test_responsive_viewports(page):
+    """Test that the app renders without overflow at various screen sizes."""
+    print("\n━━━ Responsive Viewports ━━━")
+
+    viewports = [
+        ("desktop", 1280, 800),
+        ("tablet", 768, 1024),
+        ("mobile", 375, 667),
+    ]
+    for name, w, h in viewports:
+        page.set_viewport_size({"width": w, "height": h})
+        page.goto(BASE_URL)
+        page.wait_for_selector("#dropZone", state="visible", timeout=10000)
+
+        overflow = page.evaluate(
+            "document.documentElement.scrollWidth > document.documentElement.clientWidth"
+        )
+        result(f"no horizontal overflow at {name} ({w}x{h})", not overflow,
+               f"scrollWidth > clientWidth")
+
+        drop = page.locator("#dropZone")
+        visible = drop.is_visible()
+        result(f"drop zone visible at {name}", visible)
+
+
 def main():
     global PASS, FAIL
 
@@ -1848,6 +1873,7 @@ def _run_tests():
             test_pbix_data_extraction_functions,
             test_compact_header_aggressive,
             test_no_console_errors_with_new_features,
+            test_responsive_viewports,
         ]
 
         for test_fn in tests:

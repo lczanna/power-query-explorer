@@ -343,4 +343,33 @@
             .graph-search input { width:120px; }
             .compact .header-stats { white-space: normal; }
             .stats-break { display: block; }
+            .gh-star-btn .gh-star-right { display: none; }
+            .compact .header-right { flex-wrap: wrap; }
         }
+
+        /* GitHub Star Button */
+        .gh-star-btn {
+            display: inline-flex; align-items: center; gap: 0;
+            border-radius: var(--radius-sm); border: 1px solid var(--border-color);
+            overflow: hidden; font-size: 12px; font-family: inherit;
+            cursor: pointer; text-decoration: none; line-height: 1;
+            transition: border-color 0.15s; flex-shrink: 0;
+        }
+        .gh-star-btn:hover { border-color: var(--accent-teal); }
+        .gh-star-left {
+            display: flex; align-items: center; gap: 5px;
+            padding: 5px 10px; background: var(--bg-tertiary); color: var(--text-secondary);
+            transition: background 0.15s, color 0.15s;
+        }
+        .gh-star-btn:hover .gh-star-left { background: var(--bg-elevated); color: var(--text-primary); }
+        .gh-star-left svg { width: 14px; height: 14px; flex-shrink: 0; }
+        .gh-star-left .star-icon { color: #f0c040; }
+        .gh-star-right {
+            display: flex; align-items: center;
+            padding: 5px 9px; background: var(--bg-secondary); color: var(--text-muted);
+            border-left: 1px solid var(--border-color); font-family: 'Cascadia Code','Fira Code','Consolas',monospace;
+            font-size: 11px; transition: color 0.15s;
+        }
+        .gh-star-btn:hover .gh-star-right { color: var(--text-secondary); }
+        header .gh-star-btn { display: none; }
+        .compact header .gh-star-btn { display: inline-flex; }

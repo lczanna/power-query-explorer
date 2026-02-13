@@ -20,7 +20,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_DIR = os.path.join(ROOT, 'src')
-OUT_PATH = os.path.join(ROOT, 'power-query-explorer.html')
+OUT_PATH = os.path.join(ROOT, 'index.html')
 
 
 def read_src(filename):

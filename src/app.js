@@ -11,7 +11,8 @@ const PROMPT_TEMPLATES={
     analyze:'Analyze these Power Query M scripts. For each query:\n1. Identify what data source it connects to\n2. Map all dependencies between queries\n3. Suggest which queries could be consolidated\n4. Identify any circular dependencies or issues\n\nHere are the queries:\n\n',
     optimize:'Review these Power Query M scripts for performance optimizations:\n1. Identify any inefficient patterns (e.g., multiple source reads, unnecessary type conversions)\n2. Suggest query folding opportunities\n3. Recommend step reordering for better performance\n4. Flag any operations that might cause full data loads\n\nHere are the queries:\n\n',
     document:'Generate documentation for these Power Query M scripts:\n1. Create a summary of each query\'s purpose\n2. Document the data flow from sources to final outputs\n3. List all parameters and their expected values\n4. Create a dependency diagram in Mermaid format\n\nHere are the queries:\n\n',
-    errors:'Review these Power Query M scripts for potential errors and issues:\n1. Check for hardcoded values that should be parameters\n2. Identify missing error handling\n3. Flag potential null/empty value issues\n4. Check for type mismatches\n5. Identify queries that might fail with data changes\n\nHere are the queries:\n\n'
+    errors:'Review these Power Query M scripts for potential errors and issues:\n1. Check for hardcoded values that should be parameters\n2. Identify missing error handling\n3. Flag potential null/empty value issues\n4. Check for type mismatches\n5. Identify queries that might fail with data changes\n\nHere are the queries:\n\n',
+    roast:'Roast these Power Query M scripts. Be brutally honest and funny about bad naming conventions, questionable design choices, unnecessary complexity, missing best practices, and anything else that makes you cringe. Don\'t hold back.\n\nHere are the queries:\n\n'
 };
 const FILE_COLORS=['#60c0a0','#4c86c8','#7a67c7','#c88a36','#c65364','#3e9b6c','#6f7f95','#9c6f4f','#5f8f8a','#8d6fae'];
 let appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null,worksheets:[],activeSheet:null,dataProfile:null};
@@ -1539,3 +1540,9 @@ document.getElementById('exportParquetBtn').addEventListener('click',()=>{
     const ws=appState.worksheets.find(w=>appState.activeSheet&&w.fileName===appState.activeSheet.fileName&&w.sheetName===appState.activeSheet.sheetName);
     exportParquet(ws);
 });
+
+// Fetch GitHub star count
+fetch('https://api.github.com/repos/lczanna/power-query-explorer')
+  .then(function(r){return r.json()})
+  .then(function(d){if(d.stargazers_count!=null)document.getElementById('ghStarCount').textContent=d.stargazers_count;})
+  .catch(function(){});
