@@ -1541,8 +1541,3 @@ document.getElementById('exportParquetBtn').addEventListener('click',()=>{
     exportParquet(ws);
 });
 
-// Fetch GitHub star count
-fetch('https://api.github.com/repos/lczanna/power-query-explorer')
-  .then(function(r){return r.json()})
-  .then(function(d){if(d.stargazers_count!=null)document.getElementById('ghStarCount').textContent=d.stargazers_count;})
-  .catch(function(){});
