@@ -704,9 +704,9 @@ def test_prompt_templates(page):
     dropdown = page.locator("#promptDropdown")
     result("Prompt dropdown visible", dropdown.is_visible())
 
-    # 6 options (No prompt + 5 templates including roast)
+    # 5 options (No prompt + 4 templates)
     options = dropdown.locator("option")
-    result("6 prompt options", options.count() == 6, f"Got: {options.count()}")
+    result("5 prompt options", options.count() == 5, f"Got: {options.count()}")
 
     # Select a prompt and click Copy All
     dropdown.select_option("analyze")
