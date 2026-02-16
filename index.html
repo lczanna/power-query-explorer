@@ -937,6 +937,16 @@ window.extractFromDataModel = async function(dataModelArrayBuffer, fileName) {
         @keyframes spin { to { transform:rotate(360deg); } }
         .loading p { color:var(--text-muted); font-size:13px; }
         .loading .file-progress { margin-top:12px; font-family:'Cascadia Code','Fira Code','Consolas',monospace; font-size:12px; color:var(--text-dim); }
+        .skip-data-btn {
+            margin-top:20px; padding:7px 18px;
+            background:var(--bg-tertiary); border:1px solid var(--border-color);
+            border-radius:var(--radius-sm); font-size:12px; color:var(--text-secondary);
+            cursor:pointer; transition:all 0.2s; font-family:inherit; font-weight:500;
+        }
+        .skip-data-btn:hover:not(:disabled) { background:var(--bg-elevated); color:var(--text-primary); border-color:var(--accent-teal); }
+        .skip-data-btn:disabled { opacity:0.6; cursor:default; }
+        .skip-data-btn.skipped { border-color:var(--accent-teal); color:var(--accent-teal); background:var(--accent-teal-dim); }
+        .skip-data-hint { margin-top:8px; font-size:11px; color:var(--text-dim); }
 
         .error-log { display:none; margin-top:12px; padding:12px 16px; background:var(--accent-rose-dim); border:1px solid rgba(198,83,100,0.35); border-radius:var(--radius-md); font-size:12px; color:var(--accent-rose); }
         .error-log.visible { display:block; }
@@ -1157,7 +1167,7 @@ window.extractFromDataModel = async function(dataModelArrayBuffer, fileName) {
             </a>
         </div>
 
-        <div class="loading" id="loading"><div class="spinner-ring"></div><p>Extracting Power Query code&hellip;</p><div class="file-progress" id="fileProgress"></div></div>
+        <div class="loading" id="loading"><div class="spinner-ring"></div><p>Extracting Power Query code&hellip;</p><div class="file-progress" id="fileProgress"></div><button class="skip-data-btn" id="skipDataBtn">Skip data loading</button><div class="skip-data-hint">Faster &mdash; data preview &amp; profile will not be available</div></div>
 
         <div class="error-log" id="errorLog">
             <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Some files had issues</h4>
@@ -1279,7 +1289,7 @@ const PROMPT_TEMPLATES={
     errors:'Review these Power Query M scripts for potential errors and issues:\n1. Check for hardcoded values that should be parameters\n2. Identify missing error handling\n3. Flag potential null/empty value issues\n4. Check for type mismatches\n5. Identify queries that might fail with data changes\n\nHere are the queries:\n\n'
 };
 const FILE_COLORS=['#60c0a0','#4c86c8','#7a67c7','#c88a36','#c65364','#3e9b6c','#6f7f95','#9c6f4f','#5f8f8a','#8d6fae'];
-let appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null,worksheets:[],activeSheet:null,dataProfile:null};
+let appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null,worksheets:[],activeSheet:null,dataProfile:null,skipData:false};
 
 function escapeHtml(t){return typeof t!=='string'?'':t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 
@@ -1697,8 +1707,10 @@ async function processFiles(files){
     document.getElementById('errorLog').classList.remove('visible');
     hideBottomNotice();
     const prog=document.getElementById('fileProgress');
+    const skipBtn=document.getElementById('skipDataBtn');
+    skipBtn.textContent='Skip data loading';skipBtn.disabled=false;skipBtn.classList.remove('skipped');
     if(appState.cyInstance){appState.cyInstance.destroy();}
-    appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null,worksheets:[],activeSheet:null,dataProfile:null};
+    appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null,worksheets:[],activeSheet:null,dataProfile:null,skipData:false};
 
     for(let i=0;i<files.length;i++){
         const f=files[i];prog.textContent=(i+1)+' / '+files.length+': '+f.name;
@@ -1708,11 +1720,16 @@ async function processFiles(files){
             if(r.errors.length)appState.errors.push(...r.errors.map(e=>({file:f.name,msg:e})));
             if(r.queries.length>0){appState.files.push(f.name);appState.queries.push(...r.queries);}
             else appState.errors.push({file:f.name,msg:'No Power Query code found'});
+            // Yield to event loop so pending UI events (e.g. skip-data click) are processed
+            await new Promise(r=>setTimeout(r,0));
             // Extract worksheet/table data
-            if(!isPbixFile(f.name)){try{const ws=await extractWorksheetData(f);appState.worksheets.push(...ws);}catch(e){}}
-            else{try{const ws=await extractPbixTableData(f);appState.worksheets.push(...ws);}catch(e){}}
+            if(!appState.skipData){
+                if(!isPbixFile(f.name)){try{const ws=await extractWorksheetData(f);appState.worksheets.push(...ws);}catch(e){}}
+                else{try{const ws=await extractPbixTableData(f);appState.worksheets.push(...ws);}catch(e){}}
+            }
         }catch(e){appState.errors.push({file:f.name,msg:e.message||'Failed to parse'});}
     }
+    if(appState.skipData){appState.worksheets=[];}
 
     document.getElementById('loading').classList.remove('active');
     const noQueryErrors=appState.errors.filter(e=>e.msg==='No Power Query code found');
@@ -1745,7 +1762,7 @@ async function processFiles(files){
 
 function resetApp(){
     if(appState.cyInstance){appState.cyInstance.destroy();}
-    appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null,worksheets:[],activeSheet:null,dataProfile:null};
+    appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null,worksheets:[],activeSheet:null,dataProfile:null,skipData:false};
     document.getElementById('mainContent').classList.remove('active');
     document.getElementById('resetBtn').classList.remove('visible');
     document.getElementById('errorLog').classList.remove('visible');
@@ -1831,6 +1848,12 @@ dz.addEventListener('click',e=>{if(e.target.closest('.browse-btn')||e.target===f
 fi.addEventListener('change',async e=>{const f=Array.from(e.target.files).filter(f=>isSupportedFile(f.name));if(f.length)await processFiles(f);});
 
 document.getElementById('resetBtn').addEventListener('click',resetApp);
+
+document.getElementById('skipDataBtn').addEventListener('click',()=>{
+    appState.skipData=true;
+    const btn=document.getElementById('skipDataBtn');
+    btn.textContent='Data loading skipped';btn.disabled=true;btn.classList.add('skipped');
+});
 
 document.querySelectorAll('.tab').forEach(tab=>{tab.addEventListener('click',()=>{
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));tab.classList.add('active');

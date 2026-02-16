@@ -1719,6 +1719,104 @@ def test_compact_header_aggressive(page):
     result("Inline header stats has content", len(header_stats.text_content()) > 0, header_stats.text_content())
 
 
+def test_skip_data_loading(page):
+    """Test that clicking 'Skip data loading' during processing prevents data extraction."""
+    print("\n━━━ Skip Data Loading ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+
+    # Set up a MutationObserver that clicks the skip button as soon as loading becomes active
+    page.evaluate("""() => {
+        const loading = document.getElementById('loading');
+        const observer = new MutationObserver(() => {
+            if (loading.classList.contains('active')) {
+                document.getElementById('skipDataBtn').click();
+                observer.disconnect();
+            }
+        });
+        observer.observe(loading, { attributes: true, attributeFilter: ['class'] });
+    }""")
+
+    # Upload xlsx file (which normally produces worksheet data)
+    upload_files(page, ["simple_query.xlsx"])
+
+    # Verify skip was activated
+    skip_clicked = page.evaluate("() => appState.skipData === true")
+    result("skipData flag is true after clicking skip button", skip_clicked)
+
+    # Worksheets should be empty
+    ws_count = page.evaluate("() => appState.worksheets.length")
+    result("No worksheets extracted when skip clicked", ws_count == 0, f"Got: {ws_count}")
+
+    # Data tab should be hidden
+    data_tab = page.locator("#dataTabBtn")
+    result("Data tab hidden after skip", not data_tab.is_visible())
+
+    # Profile checkbox wrapper should be hidden
+    profile_hidden = page.evaluate("() => document.getElementById('includeProfileWrap').style.display === 'none'")
+    result("Profile checkbox hidden after skip", profile_hidden)
+
+    # Header profile checkbox should also be hidden
+    header_profile_hidden = page.evaluate("() => document.getElementById('headerProfileWrap').style.display === 'none'")
+    result("Header profile checkbox hidden after skip", header_profile_hidden)
+
+    # Skip button should show 'skipped' state
+    skip_btn = page.locator("#skipDataBtn")
+    btn_text = skip_btn.inner_text()
+    result("Skip button shows 'Data loading skipped'", "skipped" in btn_text.lower(), btn_text)
+    btn_disabled = skip_btn.get_attribute("disabled")
+    result("Skip button is disabled after click", btn_disabled is not None)
+
+    # Queries should still be parsed (skip only affects data)
+    queries_stat = page.locator("#statQueries").inner_text()
+    result("Queries still parsed with skip", int(queries_stat) > 0, f"Got: {queries_stat}")
+
+    # Main content should still be visible
+    result("Main content visible with skip", page.locator("#mainContent").is_visible())
+
+
+def test_skip_data_loading_reset(page):
+    """Test that skip data state resets properly when uploading new files."""
+    print("\n━━━ Skip Data Loading Reset ━━━")
+
+    page.goto(BASE_URL)
+    page.wait_for_load_state("networkidle")
+
+    # First upload with skip
+    page.evaluate("""() => {
+        const loading = document.getElementById('loading');
+        const observer = new MutationObserver(() => {
+            if (loading.classList.contains('active')) {
+                document.getElementById('skipDataBtn').click();
+                observer.disconnect();
+            }
+        });
+        observer.observe(loading, { attributes: true, attributeFilter: ['class'] });
+    }""")
+    upload_files(page, ["simple_query.xlsx"])
+
+    ws_count = page.evaluate("() => appState.worksheets.length")
+    result("No worksheets after skip", ws_count == 0, f"Got: {ws_count}")
+
+    # Reset and upload without skip
+    page.locator("#resetBtn").click()
+    page.wait_for_timeout(300)
+
+    upload_files(page, ["simple_query.xlsx"])
+
+    # skipData should be false after fresh upload
+    skip_flag = page.evaluate("() => appState.skipData")
+    result("skipData is false after fresh upload", skip_flag is False, f"Got: {skip_flag}")
+
+    # Worksheets should be present now
+    ws_count2 = page.evaluate("() => appState.worksheets.length")
+    result("Worksheets extracted after fresh upload", ws_count2 > 0, f"Got: {ws_count2}")
+
+    # Data tab should be visible
+    result("Data tab visible after fresh upload", page.locator("#dataTabBtn").is_visible())
+
+
 def test_no_console_errors_with_new_features(page):
     """Test no JS errors occur with the new features (data tab, profile, exports)."""
     print("\n━━━ Console Errors (New Features) ━━━")
@@ -1872,6 +1970,8 @@ def _run_tests():
             test_tab_switching_with_data,
             test_pbix_data_extraction_functions,
             test_compact_header_aggressive,
+            test_skip_data_loading,
+            test_skip_data_loading_reset,
             test_no_console_errors_with_new_features,
             test_responsive_viewports,
         ]

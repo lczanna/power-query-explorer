@@ -14,7 +14,7 @@ const PROMPT_TEMPLATES={
     errors:'Review these Power Query M scripts for potential errors and issues:\n1. Check for hardcoded values that should be parameters\n2. Identify missing error handling\n3. Flag potential null/empty value issues\n4. Check for type mismatches\n5. Identify queries that might fail with data changes\n\nHere are the queries:\n\n'
 };
 const FILE_COLORS=['#60c0a0','#4c86c8','#7a67c7','#c88a36','#c65364','#3e9b6c','#6f7f95','#9c6f4f','#5f8f8a','#8d6fae'];
-let appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null,worksheets:[],activeSheet:null,dataProfile:null};
+let appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null,worksheets:[],activeSheet:null,dataProfile:null,skipData:false};
 
 function escapeHtml(t){return typeof t!=='string'?'':t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 
@@ -432,8 +432,10 @@ async function processFiles(files){
     document.getElementById('errorLog').classList.remove('visible');
     hideBottomNotice();
     const prog=document.getElementById('fileProgress');
+    const skipBtn=document.getElementById('skipDataBtn');
+    skipBtn.textContent='Skip data loading';skipBtn.disabled=false;skipBtn.classList.remove('skipped');
     if(appState.cyInstance){appState.cyInstance.destroy();}
-    appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null,worksheets:[],activeSheet:null,dataProfile:null};
+    appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null,worksheets:[],activeSheet:null,dataProfile:null,skipData:false};
 
     for(let i=0;i<files.length;i++){
         const f=files[i];prog.textContent=(i+1)+' / '+files.length+': '+f.name;
@@ -443,11 +445,16 @@ async function processFiles(files){
             if(r.errors.length)appState.errors.push(...r.errors.map(e=>({file:f.name,msg:e})));
             if(r.queries.length>0){appState.files.push(f.name);appState.queries.push(...r.queries);}
             else appState.errors.push({file:f.name,msg:'No Power Query code found'});
+            // Yield to event loop so pending UI events (e.g. skip-data click) are processed
+            await new Promise(r=>setTimeout(r,0));
             // Extract worksheet/table data
-            if(!isPbixFile(f.name)){try{const ws=await extractWorksheetData(f);appState.worksheets.push(...ws);}catch(e){}}
-            else{try{const ws=await extractPbixTableData(f);appState.worksheets.push(...ws);}catch(e){}}
+            if(!appState.skipData){
+                if(!isPbixFile(f.name)){try{const ws=await extractWorksheetData(f);appState.worksheets.push(...ws);}catch(e){}}
+                else{try{const ws=await extractPbixTableData(f);appState.worksheets.push(...ws);}catch(e){}}
+            }
         }catch(e){appState.errors.push({file:f.name,msg:e.message||'Failed to parse'});}
     }
+    if(appState.skipData){appState.worksheets=[];}
 
     document.getElementById('loading').classList.remove('active');
     const noQueryErrors=appState.errors.filter(e=>e.msg==='No Power Query code found');
@@ -480,7 +487,7 @@ async function processFiles(files){
 
 function resetApp(){
     if(appState.cyInstance){appState.cyInstance.destroy();}
-    appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null,worksheets:[],activeSheet:null,dataProfile:null};
+    appState={files:[],queries:[],errors:[],selectedFiles:[],cyInstance:null,worksheets:[],activeSheet:null,dataProfile:null,skipData:false};
     document.getElementById('mainContent').classList.remove('active');
     document.getElementById('resetBtn').classList.remove('visible');
     document.getElementById('errorLog').classList.remove('visible');
@@ -566,6 +573,12 @@ dz.addEventListener('click',e=>{if(e.target.closest('.browse-btn')||e.target===f
 fi.addEventListener('change',async e=>{const f=Array.from(e.target.files).filter(f=>isSupportedFile(f.name));if(f.length)await processFiles(f);});
 
 document.getElementById('resetBtn').addEventListener('click',resetApp);
+
+document.getElementById('skipDataBtn').addEventListener('click',()=>{
+    appState.skipData=true;
+    const btn=document.getElementById('skipDataBtn');
+    btn.textContent='Data loading skipped';btn.disabled=true;btn.classList.add('skipped');
+});
 
 document.querySelectorAll('.tab').forEach(tab=>{tab.addEventListener('click',()=>{
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));tab.classList.add('active');
