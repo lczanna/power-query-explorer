@@ -1720,6 +1720,8 @@ async function processFiles(files){
             if(r.errors.length)appState.errors.push(...r.errors.map(e=>({file:f.name,msg:e})));
             if(r.queries.length>0){appState.files.push(f.name);appState.queries.push(...r.queries);}
             else appState.errors.push({file:f.name,msg:'No Power Query code found'});
+            // Yield to event loop so pending UI events (e.g. skip-data click) are processed
+            await new Promise(r=>setTimeout(r,0));
             // Extract worksheet/table data
             if(!appState.skipData){
                 if(!isPbixFile(f.name)){try{const ws=await extractWorksheetData(f);appState.worksheets.push(...ws);}catch(e){}}
