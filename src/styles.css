@@ -196,6 +196,16 @@
         @keyframes spin { to { transform:rotate(360deg); } }
         .loading p { color:var(--text-muted); font-size:13px; }
         .loading .file-progress { margin-top:12px; font-family:'Cascadia Code','Fira Code','Consolas',monospace; font-size:12px; color:var(--text-dim); }
+        .skip-data-btn {
+            margin-top:20px; padding:7px 18px;
+            background:var(--bg-tertiary); border:1px solid var(--border-color);
+            border-radius:var(--radius-sm); font-size:12px; color:var(--text-secondary);
+            cursor:pointer; transition:all 0.2s; font-family:inherit; font-weight:500;
+        }
+        .skip-data-btn:hover:not(:disabled) { background:var(--bg-elevated); color:var(--text-primary); border-color:var(--accent-teal); }
+        .skip-data-btn:disabled { opacity:0.6; cursor:default; }
+        .skip-data-btn.skipped { border-color:var(--accent-teal); color:var(--accent-teal); background:var(--accent-teal-dim); }
+        .skip-data-hint { margin-top:8px; font-size:11px; color:var(--text-dim); }
 
         .error-log { display:none; margin-top:12px; padding:12px 16px; background:var(--accent-rose-dim); border:1px solid rgba(198,83,100,0.35); border-radius:var(--radius-md); font-size:12px; color:var(--accent-rose); }
         .error-log.visible { display:block; }
